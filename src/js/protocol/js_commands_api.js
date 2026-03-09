@@ -380,6 +380,21 @@ export class CCommandAPI {
 
 
 
+    static API_startTelemetry() {
+
+        const msg =
+        {
+            'mt': js_andruavMessages.CONST_TYPE_AndruavMessage_RemoteExecute,
+            'ms': {
+                C: js_andruavMessages.CONST_RemoteCommand_TELEMETRYCTRL,
+                Act: js_andruavMessages.CONST_TELEMETRY_REQUEST_START
+            }
+        };
+
+        return msg;
+    };
+
+
     static API_resumeTelemetry() {
 
         const msg =

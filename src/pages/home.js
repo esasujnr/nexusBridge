@@ -8,13 +8,12 @@ import '../css/css_gamepad.css';
 import 'jquery-ui-dist/jquery-ui.min.js';
 import 'jquery-knob/dist/jquery.knob.min.js';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation , withTranslation} from 'react-i18next';
 
 
 import { js_globals } from '../js/js_globals.js';
 import ClssHeaderControl from '../components/jsc_header';
-import ClssFooterControl from '../components/jsc_footer';
 import ClssGlobalSettings from '../components/jsc_globalSettings';
 import ClssAndruavUnitList from '../components/unit_controls/jsc_unitControlMainList.jsx';
 import ClssYawDialog from '../components/dialogs/jsc_yawDialogControl.jsx';
@@ -28,14 +27,28 @@ import ClssAndruavUnitListArray from '../components/unit_controls/jsc_unitContro
 import ClssUnitParametersList from '../components/dialogs/jsc_unitParametersList.jsx';
 import ClssConfigGenerator from '../components/jsc_config_generator.jsx'
 import { ClssCVideoControl } from '../components/video/jsc_videoDisplayComponent.jsx';
-import { fn_on_ready } from '../js/js_main';
+import { fn_on_ready, fn_showMap, fn_showVideoMainTab } from '../js/js_main';
 
 const Home = () => {
   const { t } = useTranslation('home'); // Use home namespace
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isVideoView, setIsVideoView] = useState(false);
 
   useEffect(() => {
     js_globals.CONST_MAP_EDITOR = false;
     fn_on_ready();
+  }, []);
+
+  useEffect(() => {
+    const handleMainViewChanged = (event) => {
+      const view = event && event.detail ? event.detail.view : 'map';
+      setIsVideoView(view === 'video');
+    };
+
+    window.addEventListener('nb-main-view-changed', handleMainViewChanged);
+    return () => {
+      window.removeEventListener('nb-main-view-changed', handleMainViewChanged);
+    };
   }, []);
 
   return (
@@ -117,10 +130,43 @@ const Home = () => {
 
         <div id="row_2" className="col-lg-4 col-xl-4 col-xxl-4 col-12">
           <div id="andruavUnits" className="col-sm-12 padding_zero">
-            <div id="andruavUnits_in" className="">
+            <div className="settings-panel-toolbar">
+              <button
+                type="button"
+                id="btn_settingsPanelToggle"
+                className="btn btn-warning btn-sm settings-panel-icon-btn"
+                aria-expanded={isSettingsOpen}
+                aria-controls="andruavUnits_in"
+                aria-label="Toggle settings"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+              >
+                <span className="bi bi-gear-fill settings-panel-toggle__gear" aria-hidden="true"></span>
+              </button>
+              <button
+                type="button"
+                id="btn_mediaViewToggle"
+                className="btn btn-warning btn-sm settings-panel-icon-btn"
+                title={isVideoView ? 'Map' : 'Video'}
+                aria-label={isVideoView ? 'Show map' : 'Show video'}
+                onClick={() => {
+                  if (isVideoView) {
+                    fn_showMap();
+                  } else {
+                    fn_showVideoMainTab();
+                  }
+                }}
+              >
+                {isVideoView ? (
+                  <span className="bi bi-map-fill settings-panel-map-icon" aria-hidden="true"></span>
+                ) : (
+                  <img src="/images/de/video_icon_white.svg" className="settings-panel-media-icon" alt="" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+            <div id="andruavUnits_in" className="settings-panel-body" style={{ display: isSettingsOpen ? 'block' : 'none' }}>
               <ClssGlobalSettings />
               <div id="andruavUnitGlobals"></div>
-              <p className="bg-warning text-center css_margin_top_small">
+              <p className="bg-primary txt-theme-aware text-center css_margin_top_small rounded_6px mb-2">
                 <strong>{t('home:onlineUnits')}</strong>
               </p>
             </div>
@@ -280,9 +326,6 @@ const Home = () => {
         </div>
       </div>
 
-      <div id="footer_div" className="row mt-0 me-0 mw-0">
-        <ClssFooterControl />
-      </div>
     </div>
   );
 };

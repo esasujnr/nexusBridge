@@ -1,6 +1,5 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
 
 // Import your translation files (create these based on your HTML example)
 
@@ -56,7 +55,6 @@ import fr_jsc_global_settings from '../locales/fr/jsc_global_settings.json';
 
 i18n
   .use(initReactI18next)
-  .use(LanguageDetector)
   .init({
     resources: {
       en: { 
@@ -110,12 +108,9 @@ i18n
         globalSettings:ru_jsc_global_settings
       },
     },
+    lng: 'en',
     fallbackLng: 'en', // Default to English
     interpolation: { escapeValue: false }, // React handles escaping
-    detection: { 
-      order: ['localStorage', 'navigator'], // Persist in localStorage, detect from browser
-      caches: ['localStorage'], 
-    },
   });
 
 export default i18n;

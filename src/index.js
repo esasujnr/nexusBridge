@@ -1,7 +1,34 @@
 import { fn_loadConfig } from './js/js_siteConfig.js';
 
+const CONST_FAVICON_HREF = '/images/de/nexus_bridge_favicon.svg?v=3';
+
+function fn_forceFavicon() {
+  const head = document.head || document.getElementsByTagName('head')[0];
+  if (!head) return;
+
+  const oldLinks = head.querySelectorAll("link[rel='icon'], link[rel='shortcut icon']");
+  oldLinks.forEach((node) => node.parentNode && node.parentNode.removeChild(node));
+
+  const icon = document.createElement('link');
+  icon.setAttribute('rel', 'icon');
+  icon.setAttribute('type', 'image/svg+xml');
+  icon.setAttribute('href', CONST_FAVICON_HREF);
+  head.appendChild(icon);
+
+  const shortcut = document.createElement('link');
+  shortcut.setAttribute('rel', 'shortcut icon');
+  shortcut.setAttribute('type', 'image/svg+xml');
+  shortcut.setAttribute('href', CONST_FAVICON_HREF);
+  head.appendChild(shortcut);
+}
+
 
 async function fn_startApp() {
+
+  // Force favicon at runtime to avoid stale browser fallback on /favicon.ico.
+  fn_forceFavicon();
+  setTimeout(fn_forceFavicon, 300);
+  setTimeout(fn_forceFavicon, 1500);
 
   await fn_loadConfig();
 
@@ -13,12 +40,9 @@ async function fn_startApp() {
 
   const Layout = (await import('./pages/Layout')).default;
   const Home = (await import('./pages/home')).default;
-  const Planning = (await import('./pages/planning')).default;
-  const Accounts = (await import('./pages/accounts')).default;
   const NoPage = (await import('./pages/NoPage')).default;
   const GamePadTesterPage = (await import('./pages/gamepadTester')).default;
   const DebugPage = (await import('./pages/debug')).default;
-  const { ThemeProvider } = await import('./js/js_theme_context');
 
 
   function App2() {
@@ -32,10 +56,6 @@ async function fn_startApp() {
             <Route path="index" element={<Home />} />
             <Route path="home" element={<Home />} />
             <Route path="webclient" element={<Home />} />
-            <Route path="planner" element={<Planning />} />
-            <Route path="planning" element={<Planning />} />
-            <Route path="mapeditor" element={<Planning />} />
-            <Route path="accounts" element={<Accounts />} />
             <Route path="gamepad" element={<GamePadTesterPage />} />
             <Route path="debug" element={<DebugPage />} />
             <Route path="*" element={<NoPage />} />
@@ -49,9 +69,7 @@ async function fn_startApp() {
   const root = ReactDOM.createRoot(document.getElementById('root'));
   root.render(
     <I18nextProvider i18n={i18n}>
-      <ThemeProvider>
-        <App2 />
-      </ThemeProvider>
+      <App2 />
     </I18nextProvider>
   );
 }

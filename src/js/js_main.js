@@ -29,6 +29,7 @@ import { js_localStorage } from './js_localStorage'
 import { js_webrtcstream } from './js_webrtcthin2.js'
 import { js_adsbUnit } from './js_adsbUnit.js'
 import { mavlink20 } from './js_mavlink_v2.js'
+import { fn_getUnitColorKey, fn_getUnitColorPalette } from './js_unit_colors.js'
 
 import { ClssMainContextMenu } from '../components/popups/jsc_main_context_menu.jsx'
 import { ClssWaypointStepContextMenu } from '../components/popups/jsc_waypoint_step_content_menu.jsx'
@@ -50,15 +51,63 @@ $.fn.append = function ($el) {
 var v_context_busy = false;
 
 var info_unit_context_popup = null;
+export function fn_closeContextPopup() {
+	// Close whichever popup Leaflet currently considers active.
+	try {
+		if (js_leafletmap && js_leafletmap.m_Map && typeof js_leafletmap.m_Map.closePopup === 'function') {
+			js_leafletmap.m_Map.closePopup();
+		}
+	} catch {
+		// no-op
+	}
+
+	if (info_unit_context_popup === null || info_unit_context_popup === undefined) return;
+	try {
+		js_leafletmap.fn_hideInfoWindow(info_unit_context_popup);
+	} catch {
+		// no-op
+	}
+	info_unit_context_popup = null;
+}
+
 let selectedMissionFilesToRead = "";
-let selectedMissionFilesToWrite = "";
+const CONST_DEFAULT_MAP_LOCATION_GHANA = Object.freeze({
+	lat: 7.9465,
+	lng: -1.0232,
+	zoom: 7
+});
+let v_hasAutoCenteredOnConnectedVehicle = false;
+const WS_RECONNECT_MAX_ATTEMPTS = 4;
+const WS_RECONNECT_BASE_DELAY_MS = 1500;
+const UDP_RECOVERY_MAX_ATTEMPTS = 2;
+const UDP_RECOVERY_POLL_MS = 1200;
+const UDP_RECOVERY_COOLDOWN_MS = 8000;
+let v_wsReconnectTimer = null;
+let v_wsReconnectAttempts = 0;
+let v_lastSocketStatusEvent = null;
+const v_udpRecoveryJobs = {};
+const v_udpRecoveryCooldown = {};
+
+function fn_diag(subsystem, stage, data = {}) {
+	try {
+		console.info('[DIAG]', {
+			traceId: js_globals.v_connectTraceId || 'na',
+			subsystem: subsystem,
+			stage: stage,
+			...data
+		});
+	} catch {
+		return;
+	}
+}
+
+function fn_newTraceID() {
+	js_globals.v_connectTraceSeq = (js_globals.v_connectTraceSeq || 0) + 1;
+	return `${Date.now().toString(36)}-${js_globals.v_connectTraceSeq.toString(36)}-${js_common.fn_generateRandomString(3)}`;
+}
 
 export const setSelectedMissionFilePathToRead = function (p_file_name) {
 	selectedMissionFilesToRead = p_file_name;
-}
-
-export const setSelectedMissionFilePathToWrite = function (p_file_name) {
-	selectedMissionFilesToWrite = p_file_name;
 }
 
 export const QueryString = function () {
@@ -236,11 +285,6 @@ function fn_handleKeyBoard() {
 
 				if (key.toLowerCase() === 'r') {
 					fn_showVideoMainTab();
-				}
-
-				if (key >= '1' && key <= '6') {
-					js_localStorage.fn_setDisplayMode(parseInt(parseInt(key) - 1));
-					fn_applyControl(parseInt(key));
 				}
 			}
 		}
@@ -432,9 +476,9 @@ function fn_doGimbalCtrl(unit, pitch, roll, yaw) {
 export function fn_showVideoMainTab() {
 	$('#div_map_view').hide();
 	$('#div_video_control').show();
-
-	$('#btn_showMap').show();
-	$('#btn_showVideo').hide();
+	if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+		window.dispatchEvent(new CustomEvent('nb-main-view-changed', { detail: { view: 'video' } }));
+	}
 }
 
 
@@ -450,184 +494,14 @@ function fn_activateClassicalView() {
 	$('#andruav_unit_list_array_fixed').hide();
 	$('#andruav_unit_list_array_float').hide();
 
-	$('#btn_showSettings').show();
-
-	$('#btn_showVideo').show();
-	$('#btn_showMap').show();
-
 	$([document.documentElement, document.body]).animate({
 		scrollTop: $("#row_2").offset().top
 	}, 100);
 }
 
-function fn_activateMapCameraSectionOnly() {
-	$('#row_2').hide();
-	$('#row_1').show();
-	$('#row_1').removeClass();
-	$('#row_1').addClass('col-12');
-
-	$('#div_map_view').show();
-	$('#andruav_unit_list_array_fixed').hide();
-	$('#andruav_unit_list_array_float').hide();
-
-	$('#btn_showSettings').hide();
-	$('#btn_showVideo').show();
-	$('#btn_showMap').hide();
-}
-
-
-function fn_activateFixedVehicleListOnly() {
-	$('#row_2').hide();
-	$('#row_1').show();
-	$('#row_1').removeClass();
-	$('#row_1').addClass('col-12');
-
-	$('#div_map_view').hide();
-	$('#andruav_unit_list_array_fixed').show();
-	$('#andruav_unit_list_array_float').hide();
-
-	$('#btn_showSettings').hide();
-	$('#btn_showVideo').hide();
-	$('#btn_showMap').hide();
-}
-
-function fn_activateMapCameraSectionAndFloatingList() {
-	$('#row_2').hide();
-	$('#row_1').show();
-	$('#row_1').removeClass();
-	$('#row_1').addClass('col-12');
-
-	$('#div_map_view').show();
-	$('#andruav_unit_list_array_fixed').hide();
-	$('#andruav_unit_list_array_float').show();
-	$('#andruav_unit_list_array_float').css({ top: 400, left: 10, position: 'absolute' });
-
-	$('#btn_showSettings').hide();
-	$('#btn_showVideo').show();
-	$('#btn_showMap').hide();
-}
-
-function fn_activateAllViews() {
-	$('#row_2').show();
-	$('#row_1').show();
-	$('#row_1').removeClass();
-	$('#row_2').removeClass();
-	$('#row_1').addClass('col-lg-8 col-xl-8 col-xxl-8 col-12');
-	$('#row_2').addClass('col-lg-4 col-xl-4 col-xxl-4 col-12');
-
-
-	$('#div_map_view').show();
-	$('#andruav_unit_list_array_fixed').hide();
-	$('#andruav_unit_list_array_float').show();
-	$('#andruav_unit_list_array_float').css({ top: 400, left: 10, position: 'absolute' });
-
-	$('#btn_showSettings').show();
-	$('#btn_showVideo').show();
-	$('#btn_showMap').show();
-
-	$([document.documentElement, document.body]).animate({
-		scrollTop: $("#row_2").offset().top
-	}, 100);
-}
-
-function fn_activateVehicleCardOnly() {
-	$('#row_2').show();
-	$('#row_1').hide();
-	$('#row_2').removeClass();
-	$('#row_2').addClass('col-12');
-
-	$('#div_map_view').hide();
-	$('#andruav_unit_list_array_fixed').hide();
-	$('#andruav_unit_list_array_float').hide();
-
-	$('#btn_showSettings').show();
-	$('#btn_showVideo').hide();
-	$('#btn_showMap').hide();
-}
-
-export function fn_applyControl(v_small_mode) {
-	let v_display_mode = js_localStorage.fn_getDisplayMode();
-
-	if (v_display_mode == null) v_display_mode = 0;
-
-	if (v_small_mode === true) {
-		switch (v_display_mode % 4) {
-			case 0:
-				// Classic View
-				fn_activateClassicalView();
-				$('#btn_showControl').html("<strong>DISPLAY-1</strong>");
-
-				break;
-
-			case 1:
-				// Map or Camera Only
-				fn_activateMapCameraSectionOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-2</strong>");
-				break;
-
-
-			case 2:
-				// Vehicle List
-				fn_activateFixedVehicleListOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-3</strong>");
-				break;
-
-			case 3:
-				// Vehicle Control Cards
-				fn_activateVehicleCardOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-4</strong>");
-				break;
-
-			default:
-				break;
-		}
-	}
-	else {
-		switch (v_display_mode % 6) {
-			case 0:
-				// Classic View
-				fn_activateClassicalView();
-				$('#btn_showControl').html("<strong>DISPLAY-1</strong>");
-				break;
-
-			case 1:
-				fn_activateMapCameraSectionOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-2</strong>");
-				break;
-
-
-			case 2:
-				fn_activateMapCameraSectionAndFloatingList();
-				$('#btn_showControl').html("<strong>DISPLAY-3</strong>");
-				break;
-
-			case 3:
-				fn_activateFixedVehicleListOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-4</strong>");
-				break;
-
-			case 4:
-				fn_activateVehicleCardOnly();
-				$('#btn_showControl').html("<strong>DISPLAY-5</strong>");
-				break;
-
-			case 5:
-				fn_activateAllViews();
-				$('#btn_showControl').html("<strong>DISPLAY-6</strong>");
-				break;
-
-			default:
-				break;
-		}
-	}
-
-	js_localStorage.fn_setDisplayMode(v_display_mode);
+export function fn_applyControl() {
+	fn_activateClassicalView();
 	js_leafletmap.fn_invalidateSize();
-}
-
-export function fn_showControl(v_small_mode) {
-	js_localStorage.fn_setDisplayMode(parseInt(js_localStorage.fn_getDisplayMode()) + 1);
-	fn_applyControl(v_small_mode);
 }
 
 
@@ -636,16 +510,9 @@ export function fn_showControl(v_small_mode) {
 export function fn_showMap() {
 	$('#div_video_control').hide();
 	$('#div_map_view').show();
-	$('#btn_showMap').hide();
-	$('#btn_showVideo').show();
-}
-
-export function fn_showSettings() {
-	$('#andruavUnits_in').toggle();
-
-	$([document.documentElement, document.body]).animate({
-		scrollTop: $("#row_2").offset().top
-	}, 100);
+	if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+		window.dispatchEvent(new CustomEvent('nb-main-view-changed', { detail: { view: 'map' } }));
+	}
 }
 
 function onWEBRTCSessionStarted(c_talk) {
@@ -1017,46 +884,31 @@ function gui_initGlobalSection() {
 };
 
 function fn_setLapout() {
-	if ((QueryString.displaymode !== null && QueryString.displaymode !== undefined) || (parseInt(QueryString.displaymode))) {
-		fn_applyControl(QueryString.displaymode);
-	}
-	else {
-		fn_applyControl(0);
-	}
+	fn_applyControl();
 }
 
 function fn_gps_getLocation() {
+	const hasQueryLocation = QueryString.lat !== null && QueryString.lat !== undefined
+		&& QueryString.lng !== null && QueryString.lng !== undefined;
 
-	function setPosition(position) {
-
-		js_globals.myposition = position;
-		if (js_globals.CONST_DISABLE_ADSG === false) {
-			js_adsbUnit.fn_changeDefaultLocation(
-				js_globals.myposition.coords.latitude,
-				js_globals.myposition.coords.longitude, 1000);
+	if (hasQueryLocation) {
+		const queryLat = parseFloat(QueryString.lat);
+		const queryLng = parseFloat(QueryString.lng);
+		if (!Number.isNaN(queryLat) && !Number.isNaN(queryLng)) {
+			js_leafletmap.fn_PanTo_latlng(queryLat, queryLng);
 		}
-		js_leafletmap.fn_PanTo_latlng(
-			js_globals.myposition.coords.latitude,
-			js_globals.myposition.coords.longitude);
 
-		js_leafletmap.fn_setZoom(8);
-	}
-
-	if (QueryString.lat !== null && QueryString.lat !== undefined) {
-		js_leafletmap.fn_PanTo_latlng(
-			QueryString.lat,
-			QueryString.lng);
-
-		js_leafletmap.fn_setZoom(QueryString.zoom);
-
+		const queryZoom = parseInt(QueryString.zoom, 10);
+		if (!Number.isNaN(queryZoom)) {
+			js_leafletmap.fn_setZoom(queryZoom);
+		}
 		return;
 	}
 
-	if (navigator.geolocation) {
-		navigator.geolocation.getCurrentPosition(setPosition, gps_showError);
-	} else {
-		// "Geolocation is not supported by this browser.";
-	}
+	js_leafletmap.fn_PanTo_latlng(
+		CONST_DEFAULT_MAP_LOCATION_GHANA.lat,
+		CONST_DEFAULT_MAP_LOCATION_GHANA.lng);
+	js_leafletmap.fn_setZoom(CONST_DEFAULT_MAP_LOCATION_GHANA.zoom);
 }
 
 // function fn_gps_showPosition(position) {
@@ -1065,26 +917,6 @@ function fn_gps_getLocation() {
 // 	map.setZoom(8);
 // }
 
-
-function gps_showError(p_error) {
-
-	js_globals.myposition = null;
-
-	switch (p_error.code) {
-		case p_error.PERMISSION_DENIED:
-			//x.innerHTML = "User denied the request for Geolocation."
-			break;
-		case p_error.POSITION_UNAVAILABLE:
-			//x.innerHTML = "Location information is unavailable."
-			break;
-		case p_error.TIMEOUT:
-			//x.innerHTML = "The request to get user location timed out."
-			break;
-		case p_error.UNKNOWN_ERROR:
-			//x.innerHTML = "An unknown p_error occurred."
-			break;
-	}
-}
 
 function saveData(fileURL, fileName) {
 	//http://muaz-khan.blogspot.com.eg/2012/10/save-files-on-disk-using-javascript-or.html
@@ -1096,18 +928,6 @@ function saveData(fileURL, fileName) {
 		save.download = fileName || 'unknown';
 		save.click();
 	}
-}
-
-
-
-export function fn_openFenceManager(p_partyID) {
-	let p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
-	if (p_andruavUnit === null || p_andruavUnit === undefined) {
-		return;
-	}
-
-	window.open('mapeditor?zoom=18&lat=' + p_andruavUnit.m_Nav_Info.p_Location.lat + '&lng=' + p_andruavUnit.m_Nav_Info.p_Location.lng);
-	return false;
 }
 
 export function fn_switchGPS(p_andruavUnit) {
@@ -1199,6 +1019,7 @@ export function fn_doCircle2(p_partyID, latitude, longitude, altitude, radius, t
 
 
 export function fn_doSetHome(p_partyID, p_latitude, p_longitude, p_altitude) {
+	fn_closeContextPopup();
 
 	let p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
 	if (p_andruavUnit !== null && p_andruavUnit !== undefined) {
@@ -1213,6 +1034,7 @@ export function fn_doSetHome(p_partyID, p_latitude, p_longitude, p_altitude) {
 }
 
 export function fn_doFlyHere(p_partyID, p_latitude, p_longitude, altitude) {
+	fn_closeContextPopup();
 	let p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
 	if (p_andruavUnit !== null && p_andruavUnit !== undefined) {
 		js_speak.fn_speak('point recieved');
@@ -1253,6 +1075,27 @@ export function fn_gotoUnit(p_andruavUnit) {
 		// 	js_leafletmap.fn_setZoom(17);
 		// }
 	}
+}
+
+function fn_resetMapAutoCenterState() {
+	v_hasAutoCenteredOnConnectedVehicle = false;
+}
+
+function fn_tryAutoCenterOnFirstConnectedVehicle(p_andruavUnit) {
+	if (v_hasAutoCenteredOnConnectedVehicle === true) return;
+	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	if (p_andruavUnit.m_IsGCS === true) return; // first drone only
+
+	const hasLocation = p_andruavUnit.m_Nav_Info && p_andruavUnit.m_Nav_Info.p_Location
+		&& p_andruavUnit.m_Nav_Info.p_Location.lat !== null
+		&& p_andruavUnit.m_Nav_Info.p_Location.lat !== undefined
+		&& p_andruavUnit.m_Nav_Info.p_Location.lng !== null
+		&& p_andruavUnit.m_Nav_Info.p_Location.lng !== undefined;
+
+	if (hasLocation !== true) return;
+
+	fn_gotoUnit(p_andruavUnit);
+	v_hasAutoCenteredOnConnectedVehicle = true;
 }
 
 export function fn_helpPage(p_url) {
@@ -1807,12 +1650,10 @@ function fn_generateContextMenuHTML(v_lat, v_lng) {
 				// REACT POPUP LIMITATION: This creates static HTML content
 				// Interactive React elements (links, buttons, events) will not work
 				// See documentation in fn_generateContextMenuHTML_MainUnitPopup for details
-				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng);
+				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng, 'nb-context-popup');
 
 				// now add your div that contains ReactDOM to it.
-				info_unit_context_popup = js_leafletmap.fn_bindPopup(info_unit_context_popup, tempContainer, v_lat, v_lng);
-
-				// now your ReactDom div is under the active popup
+				info_unit_context_popup = js_leafletmap.fn_bindPopup(info_unit_context_popup, tempContainer, v_lat, v_lng, 'nb-context-popup');
 
 				info_unit_context_popup.on('remove', function (e) {
 					info_unit_context_popup = null;
@@ -1845,10 +1686,10 @@ function fn_generateContextMenuHTML_MissionItem(v_lat, v_lng, p_wayPointStep, p_
 				// REACT POPUP LIMITATION: This creates static HTML content
 				// Interactive React elements (links, buttons, events) will not work
 				// See documentation in fn_generateContextMenuHTML_MainUnitPopup for details
-				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng);
+				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng, 'nb-context-popup nb-waypoint-popup');
 
 				// now add your div that contains ReactDOM to it.
-				info_unit_context_popup = js_leafletmap.fn_bindPopup(info_unit_context_popup, tempContainer, v_lat, v_lng);
+				info_unit_context_popup = js_leafletmap.fn_bindPopup(info_unit_context_popup, tempContainer, v_lat, v_lng, 'nb-context-popup nb-waypoint-popup');
 
 				// now your ReactDom div is under the active popup
 
@@ -1899,7 +1740,7 @@ function fn_generateContextMenuHTML_MainUnitPopup(v_lat, v_lng, v_andruavUnit, v
 				// Current limitation documented: Static popup content only
 				tempContainer.remove();  // the HTML is not linked to REACT object anymore so links will not be working.
 
-				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng);
+				info_unit_context_popup = js_leafletmap.fn_showInfoWindow(null, htmlContent, v_lat, v_lng, 'nb-context-popup nb-unit-popup');
 				if (v_ignore === true) {
 					info_unit_context_popup.m_ignoreMouseOut = true;
 				}
@@ -1960,56 +1801,227 @@ function resetzoom() {
 
 /////////////////////////////////////////////////////////////////////////////// Events from AndruavClientParser
 
+function fn_clearWsReconnectTimer() {
+	if (v_wsReconnectTimer !== null) {
+		clearTimeout(v_wsReconnectTimer);
+		v_wsReconnectTimer = null;
+	}
+}
+
+function fn_dispatchRetryStatus(retrying, failed, reason, attempt = 0) {
+	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, {
+		status: retrying ? js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING : js_andruavMessages.CONST_SOCKET_STATUS_ERROR,
+		name: retrying ? 'Connecting' : 'Error',
+		retrying: retrying === true,
+		failed: failed === true,
+		reason: reason || '',
+		attempt: attempt,
+		maxAttempts: WS_RECONNECT_MAX_ATTEMPTS
+	});
+}
+
+function fn_setTelemetryRecoveryState(p_andruavUnit, state, note) {
+	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	p_andruavUnit.m_Telemetry.m_udpProxy_recovery_state = state;
+	p_andruavUnit.m_Telemetry.m_udpProxy_status_note = note || '';
+	js_eventEmitter.fn_dispatch(js_event.EE_onProxyInfoUpdated, p_andruavUnit);
+}
+
+function fn_clearTelemetryRecoveryJob(partyID) {
+	const job = v_udpRecoveryJobs[partyID];
+	if (!job) return;
+	if (job.timer) clearTimeout(job.timer);
+	delete v_udpRecoveryJobs[partyID];
+}
+
+export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
+	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	if (js_globals.v_andruavFacade === null || js_globals.v_andruavFacade === undefined) return;
+	const partyID = p_andruavUnit.getPartyID();
+	if (!partyID) return;
+
+	const maxAttempts = Number.isFinite(p_options.maxAttempts) ? Math.max(1, parseInt(p_options.maxAttempts, 10)) : UDP_RECOVERY_MAX_ATTEMPTS;
+	const pollMs = Number.isFinite(p_options.pollMs) ? Math.max(500, parseInt(p_options.pollMs, 10)) : UDP_RECOVERY_POLL_MS;
+	const reason = p_options.reason || 'manual';
+	const force = p_options.force === true;
+	const now = Date.now();
+	const lastAt = v_udpRecoveryCooldown[partyID] || 0;
+
+	if (force !== true && (now - lastAt) < UDP_RECOVERY_COOLDOWN_MS) {
+		return;
+	}
+	v_udpRecoveryCooldown[partyID] = now;
+
+	const existingJob = v_udpRecoveryJobs[partyID];
+	if (existingJob && force !== true) {
+		return;
+	}
+	if (existingJob && force === true) {
+		fn_clearTelemetryRecoveryJob(partyID);
+	}
+
+	const runAttempt = (attemptNo) => {
+		const liveUnit = js_globals.m_andruavUnitList.fn_getUnit(partyID) || p_andruavUnit;
+		if (!liveUnit || liveUnit.m_IsDisconnectedFromGCS === true) {
+			fn_clearTelemetryRecoveryJob(partyID);
+			return;
+		}
+
+		fn_setTelemetryRecoveryState(liveUnit, 'recovering', '');
+		fn_diag('udp', 'recover_attempt', {
+			partyID: partyID,
+			attempt: attemptNo,
+			maxAttempts: maxAttempts,
+			reason: reason
+		});
+
+		js_globals.v_andruavFacade.API_startTelemetry(liveUnit);
+		js_globals.v_andruavFacade.API_resumeTelemetry(liveUnit);
+		js_globals.v_andruavFacade.API_requestUdpProxyStatus(liveUnit);
+
+		const timer = setTimeout(() => {
+			const refreshedUnit = js_globals.m_andruavUnitList.fn_getUnit(partyID) || liveUnit;
+			if (!refreshedUnit || refreshedUnit.m_IsDisconnectedFromGCS === true) {
+				fn_clearTelemetryRecoveryJob(partyID);
+				return;
+			}
+
+			js_globals.v_andruavFacade.API_requestUdpProxyStatus(refreshedUnit);
+			if (refreshedUnit.m_Telemetry.m_udpProxy_active === true) {
+				fn_setTelemetryRecoveryState(refreshedUnit, 'idle', '');
+				fn_diag('udp', 'recover_success', { partyID: partyID, attempt: attemptNo, reason: reason });
+				fn_clearTelemetryRecoveryJob(partyID);
+				return;
+			}
+
+			if (attemptNo >= maxAttempts) {
+				fn_setTelemetryRecoveryState(refreshedUnit, 'inactive', 'drone-side-inactive');
+				fn_diag('udp', 'recover_failed', { partyID: partyID, attempts: attemptNo, reason: reason });
+				fn_clearTelemetryRecoveryJob(partyID);
+				return;
+			}
+
+			runAttempt(attemptNo + 1);
+		}, pollMs);
+
+		v_udpRecoveryJobs[partyID] = {
+			timer: timer,
+			reason: reason,
+			attempt: attemptNo,
+			maxAttempts: maxAttempts
+		};
+	};
+
+	runAttempt(1);
+}
+
 // Websocket Connection established
 var EVT_onOpen = function () {
 	$('#andruavUnitGlobals').show();
 
 	js_globals.v_connectRetries = 0;
+	v_wsReconnectAttempts = 0;
+	fn_clearWsReconnectTimer();
+	fn_diag('ws', 'registered', { retriesReset: true });
+
+	const units = js_globals.m_andruavUnitList.fn_getUnitValues();
+	if (units && units.length > 0) {
+		for (const unit of units) {
+			if (!unit || unit.m_IsGCS === true || unit.m_IsDisconnectedFromGCS === true) continue;
+			fn_recoverTelemetry(unit, { reason: 'ws_open_auto', maxAttempts: 1 });
+		}
+	}
 }
 
 // called when Websocket Closed
 var EVT_onClose = function () {
+	const closeReason = v_lastSocketStatusEvent?.closeReason || '';
+	const closeCode = v_lastSocketStatusEvent?.closeCode;
+	const detailReason = closeReason
+		? `WebSocket closed (${closeCode || 'n/a'}): ${closeReason}`
+		: `WebSocket closed (${closeCode || 'n/a'})`;
 
-
-	if (js_globals.v_andruavWS !== null && js_globals.v_andruavWS !== undefined) {
-		js_globals.v_andruavWS.fn_disconnect();
-		js_globals.v_andruavWS = null;
-	}
-
-	if (js_globals.v_connectState === true) {
-
-		js_globals.v_connectRetries += 1;
-		if (js_globals.v_connectRetries >= 5) {
-			js_speak.fn_speak('Disconnected');
-		}
-		setTimeout(fn_connect, 4000);
-	}
-	else {
+	if (js_globals.v_connectState !== true) {
 		js_speak.fn_speak('Disconnected');
+		fn_diag('ws', 'closed_user_requested', { reason: detailReason });
+		return;
 	}
+
+	if (v_wsReconnectAttempts >= WS_RECONNECT_MAX_ATTEMPTS) {
+		fn_dispatchRetryStatus(false, true, `Reconnect attempts exhausted. ${detailReason}`, v_wsReconnectAttempts);
+		js_speak.fn_speak('Disconnected');
+		fn_diag('ws', 'reconnect_exhausted', {
+			attempts: v_wsReconnectAttempts,
+			maxAttempts: WS_RECONNECT_MAX_ATTEMPTS,
+			reason: detailReason
+		});
+		return;
+	}
+
+	v_wsReconnectAttempts += 1;
+	const delayMs = WS_RECONNECT_BASE_DELAY_MS * v_wsReconnectAttempts;
+	fn_dispatchRetryStatus(true, false, `Retrying connection. ${detailReason}`, v_wsReconnectAttempts);
+	fn_diag('ws', 'reconnect_scheduled', {
+		attempt: v_wsReconnectAttempts,
+		delayMs: delayMs,
+		reason: detailReason
+	});
+	fn_clearWsReconnectTimer();
+	v_wsReconnectTimer = setTimeout(async function () {
+		v_wsReconnectTimer = null;
+		const email = js_andruavAuth.m_username || js_localStorage.fn_getEmail();
+		const accessCode = js_andruavAuth.m_accesscode || js_localStorage.fn_getAccessCode();
+		if (!email || !accessCode) {
+			fn_dispatchRetryStatus(false, true, 'Missing credentials for reconnect', v_wsReconnectAttempts);
+			fn_diag('ws', 'reconnect_aborted_missing_credentials', {});
+			return;
+		}
+
+		const ok = await fn_login(email, accessCode, false, true);
+		if (!ok) {
+			fn_diag('auth', 'reconnect_login_failed', { attempt: v_wsReconnectAttempts });
+			if (v_wsReconnectAttempts >= WS_RECONNECT_MAX_ATTEMPTS) {
+				fn_dispatchRetryStatus(false, true, 'Reconnect failed after retries', v_wsReconnectAttempts);
+			} else {
+				EVT_onClose();
+			}
+		}
+	}, delayMs);
 };
 
 
 
 function fn_onSocketStatus(me, event) {
-	const name = event.name;
+	v_lastSocketStatusEvent = event;
 	const status = event.status;
-	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, event);
+	const enrichedEvent = {
+		...event,
+		retrying: event.retrying === true,
+		failed: event.failed === true
+	};
+	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, enrichedEvent);
 
 	if (status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
 		js_speak.fn_speak('Connected');
+		fn_diag('ws', 'socket_status_registered', {});
 
 		if (js_globals.CONST_MAP_EDITOR === true) {
 			js_globals.v_andruavFacade.API_loadGeoFence(js_andruavAuth.m_username, js_globals.v_andruavWS.m_groupName, null, '_drone_', 1);
 		}
 	}
-	else {
-
-	}
 };
 
 export function fn_requestWayPoints(p_andruavUnit, fromFCB) {
 	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	const partyID = p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : null;
+	if (partyID && js_globals.v_waypointsCache.hasOwnProperty(partyID) === true) {
+		delete js_globals.v_waypointsCache[partyID];
+	}
+	if (fromFCB === true) {
+		// Ensure old mission does not remain visible while reading latest mission from FCB.
+		deleteWayPointsofDrone(p_andruavUnit, []);
+		js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
+	}
 	js_globals.v_andruavFacade.API_do_GetHomeLocation(p_andruavUnit);
 	js_globals.v_andruavFacade.API_requestWayPoints(p_andruavUnit, fromFCB);
 	js_globals.v_andruavFacade.API_requestGeoFencesAttachStatus(p_andruavUnit);
@@ -2024,6 +2036,13 @@ export function fn_clearWayPoints(p_andruavUnit) {
 			js_globals.v_andruavFacade.API_requestDeleteWayPoints(p_andruavUnit);
 			js_globals.v_andruavFacade.API_requestDeleteFenceByName(p_andruavUnit);
 		}, "YES", "bg-danger text-white");
+}
+
+export function fn_clearWayPointsFromMap(p_andruavUnit) {
+	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+
+	deleteWayPointsofDrone(p_andruavUnit, []);
+	js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 }
 
 
@@ -2064,23 +2083,6 @@ export function fn_readMissionFile(p_mission, p_andruavUnit) {
 	if (js_globals.v_andruavClient === null || js_globals.v_andruavClient === undefined) return;
 
 	reader.readAsArrayBuffer(file);
-}
-
-/**
- * 
- * @param {*} p_me 
- * @param {*} p_data [unit, bool(erase_first)]
- */
-export function fn_putWayPoints(p_andruavUnit, p_erase_first) {
-	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
-
-	fn_do_modal_confirmation("Upload Mission for " + p_andruavUnit.m_unitName,
-		"Are you sure you want to upload mission?", function (p_approved) {
-			if (p_approved === false) return;
-			fn_putWayPoints_direct(p_andruavUnit, p_erase_first, selectedMissionFilesToWrite);
-
-		}, "YES", "bg-danger text-white");
-
 }
 
 export function fn_putWayPoints_direct(p_andruavUnit, p_eraseFirst, p_files) {
@@ -2124,12 +2126,23 @@ export function fn_putWayPoints_direct(p_andruavUnit, p_eraseFirst, p_files) {
 
 
 var EVT_onDeleted = function () {
-	js_globals.v_andruavWS.fn_disconnect();
+	if (js_globals.v_andruavWS) {
+		js_globals.v_andruavWS.fn_disconnect();
+	}
+	fn_clearWsReconnectTimer();
+	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
 	js_globals.v_andruavClient = null;
 	js_globals.v_andruavFacade = null;
 	js_globals.v_andruavWS = null;
 
 };
+
+function EVT_unitOnlineChanged(me, p_andruavUnit) {
+	if (!p_andruavUnit) return;
+	if (p_andruavUnit.m_IsGCS === true) return;
+	if (p_andruavUnit.m_IsDisconnectedFromGCS === true) return;
+	fn_recoverTelemetry(p_andruavUnit, { reason: 'unit_online_auto', maxAttempts: 1 });
+}
 
 
 
@@ -2319,6 +2332,9 @@ var EVT_msgFromUnit_WayPoints = function (me, data) {
 function EVT_andruavUnitFCBUpdated(me, p_andruavUnit) {
 	if (p_andruavUnit.m_useFCBIMU === true) {
 		js_speak.fn_speak(p_andruavUnit.m_unitName + ' connected to flying board');
+		if (js_globals.CONST_MAP_EDITOR !== true) {
+			fn_requestWayPoints(p_andruavUnit, true);
+		}
 	}
 	else {
 		js_speak.fn_speak(p_andruavUnit.m_unitName + ' disconnected from flying board');
@@ -2411,8 +2427,29 @@ function getDestinationPointIcon(p_andruavUnit) {
 					default:
 						return js_globals.swarm_quad_location_icon[c_vehicle_index];
 				}
-			}
+		}
 	}
+}
+
+const g_vehicleArrowIconCache = new Map();
+
+// QGroundControl vehicleArrowOpaque.svg shape, recolored per connected unit.
+const VEHICLE_ARROW_SVG_TEMPLATE = `<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" viewBox="0 0 72 72"><path d="M35.5 2.118v51.573L1.118 70.882z" fill="__PRIMARY__"/><path d="M35 4.236v49.146L2.236 69.764zM36 0 0 72l36-18z" fill="__ACCENT__"/><path d="M36.5 53.691V2.118l34.382 68.764z" fill="__SECONDARY__"/><path d="m37 4.236 32.764 65.528L37 53.382zM36 0v54l36 18z" fill="__ACCENT__"/></svg>`;
+
+function fn_getColoredVehicleArrowIcon(p_andruavUnit) {
+	const colorKey = fn_getUnitColorKey(p_andruavUnit);
+	if (g_vehicleArrowIconCache.has(colorKey)) {
+		return g_vehicleArrowIconCache.get(colorKey);
+	}
+
+	const colors = fn_getUnitColorPalette(p_andruavUnit);
+	const svg = VEHICLE_ARROW_SVG_TEMPLATE
+		.replace(/__PRIMARY__/g, colors.primary)
+		.replace(/__SECONDARY__/g, colors.secondary)
+		.replace(/__ACCENT__/g, colors.accent);
+	const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+	g_vehicleArrowIconCache.set(colorKey, dataUri);
+	return dataUri;
 }
 
 
@@ -2426,35 +2463,41 @@ export function getVehicleIcon(p_andruavUnit, applyBearing) {
 		switch (p_andruavUnit.m_VehicleType) {
 			case js_andruavUnit.VEHICLE_TRI:
 				p_andruavUnit.m_VehicleType_TXT = "Tricopter";
-				return js_globals.quad_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_QUAD:
 				p_andruavUnit.m_VehicleType_TXT = "Quadcopter";
-				return js_globals.quad_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_VTOL:
 				p_andruavUnit.m_VehicleType_TXT = "VTOL Wings";
-				return js_globals.planes_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_PLANE:
 				p_andruavUnit.m_VehicleType_TXT = "Fixed Wings";
-				return js_globals.planes_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_HELI:
 				p_andruavUnit.m_VehicleType_TXT = "Heli";
-				return '/images/heli_1_32x32.png';
+				break;
 			case js_andruavUnit.VEHICLE_ROVER:
 				p_andruavUnit.m_VehicleType_TXT = "Rover";
-				return js_globals.rover_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_BOAT:
 				p_andruavUnit.m_VehicleType_TXT = "Boat";
-				return js_globals.boat_icon[p_andruavUnit.m_index % 4];
+				break;
 			case js_andruavUnit.VEHICLE_SUBMARINE:
 				p_andruavUnit.m_VehicleType_TXT = "Submarine";
-				return '/images/submarine_gb_32x32.png';
+				break;
 			case js_andruavUnit.CONTROL_UNIT:
 				p_andruavUnit.m_VehicleType_TXT = "Control Unit";
-				return '/images/tower_cl_32x32.png';
+				break;
 			default:
-				return '/images/drone_3_32x32.png';
+				p_andruavUnit.m_VehicleType_TXT = "Vehicle";
+				break;
 		}
+		return fn_getColoredVehicleArrowIcon(p_andruavUnit);
 	}
+}
+
+export function fn_getUnitThemeColor(p_andruavUnit) {
+	return fn_getUnitColorPalette(p_andruavUnit);
 }
 
 /**
@@ -2584,6 +2627,7 @@ function EVT_msgFromUnit_GPS(me, p_andruavUnit) {
 		}
 
 		js_leafletmap.fn_setPosition_bylatlng(p_andruavUnit.m_gui.m_marker, p_andruavUnit.m_Nav_Info.p_Location.lat, p_andruavUnit.m_Nav_Info.p_Location.lng, p_andruavUnit.m_Nav_Info.p_Orientation.yaw);
+		fn_tryAutoCenterOnFirstConnectedVehicle(p_andruavUnit);
 		js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 	}
 	else {
@@ -2713,8 +2757,8 @@ var EVT_DistinationPointChanged = function (me, p_andruavUnit) {
 
 	const gui = p_andruavUnit.m_gui;
 
-	if (((js_siteConfig.CONST_FEATURE.DISABLE_SWARM_DESTINATION_PONTS === true) || (js_localStorage.fn_getAdvancedOptionsEnabled() !== true))
-		&& (p_andruavUnit.m_Geo_Tags.p_DestinationPoint.type === js_andruavMessages.CONST_DESTINATION_SWARM_MY_LOCATION)) {
+	// Keep UI simple in swarm/follow mode: do not render a second "destination drone" marker.
+	if (p_andruavUnit.m_Geo_Tags.p_DestinationPoint.type === js_andruavMessages.CONST_DESTINATION_SWARM_MY_LOCATION) {
 
 		if (gui.m_marker_destination !== null && gui.m_marker_destination !== undefined) {
 			js_leafletmap.fn_hideItem(gui.m_marker_destination);
@@ -2952,8 +2996,6 @@ function showGeoFenceInfo(p_lat, p_lng, geoFenceInfo) {
 	}
 
 	let v_contentString = "<p class='img-rounded " + _style + "'><strong>" + geoFenceInfo.m_geoFenceName + _icon + "</strong></p><span class='help-block'>" + p_lat.toFixed(7) + " " + p_lng.toFixed(7) + "</span>";
-	v_contentString += "<div class='row'><div class= 'col-sm-12'><p class='cursor_hand bg-success link-white si-07x' onclick=\"window.open('./mapeditor?zoom=" + js_leafletmap.fn_getZoom() + "&lat=" + p_lat + "&lng=" + p_lng + "', '_blank')\"," + js_globals.CONST_DEFAULT_ALTITUDE + "," + js_globals.CONST_DEFAULT_RADIUS + "," + 10 + " )\">Open Geo Fence Here</p></div></div>";
-
 	infowindow = js_leafletmap.fn_showInfoWindow(infowindow, v_contentString, p_lat, p_lng);
 
 }
@@ -3153,13 +3195,20 @@ function fn_gui_init_fpvVtrl() {
 }
 
 
-async function fn_login(p_email, p_access_code) {
-	js_andruavAuth.fn_retryLogin(true);
-	const loginResult = await js_andruavAuth.fn_do_loginAccount(p_email, p_access_code);
-	if (js_andruavAuth.fn_logined() !== true) {
-		// note that js_andruavAuth retries internally
-		return;
+async function fn_login(p_email, p_access_code, allowAuthRetry = true, keepTraceId = false) {
+	fn_resetMapAutoCenterState();
+	if (keepTraceId !== true || !js_globals.v_connectTraceId) {
+		js_globals.v_connectTraceId = fn_newTraceID();
 	}
+	js_globals.v_connectState = true;
+	fn_diag('auth', 'login_requested', { email: p_email, allowAuthRetry: allowAuthRetry === true });
+	js_andruavAuth.fn_retryLogin(allowAuthRetry === true);
+	await js_andruavAuth.fn_do_loginAccount(p_email, p_access_code);
+	if (js_andruavAuth.fn_logined() !== true) {
+		fn_diag('auth', 'login_not_ready', {});
+		return false;
+	}
+	return true;
 }
 
 function fn_connectWebSocket(me) {
@@ -3199,6 +3248,12 @@ function fn_connectWebSocket(me) {
 			isPluginMode: isPluginMode,
 			finalPartyID: js_globals.v_andruavWS.partyID,
 		});
+		fn_diag('ws', 'connect_ws_requested', {
+			authPartyID: authPartyID,
+			uiPartyID: uiPartyID,
+			isPluginMode: isPluginMode,
+			finalPartyID: js_globals.v_andruavWS.partyID
+		});
 		js_globals.v_andruavWS.m_server_ip = js_andruavAuth.m_server_ip;
 		js_globals.v_andruavWS.m_server_port = js_andruavAuth.m_server_port;
 		js_globals.v_andruavWS.m_server_port_ss = js_andruavAuth.m_server_port;
@@ -3227,6 +3282,7 @@ function fn_connectWebSocket(me) {
 		js_eventEmitter.fn_subscribe(js_event.EE_andruavUnitFlyingUpdated, this, EVT_andruavUnitFlyingUpdated);
 		js_eventEmitter.fn_subscribe(js_event.EE_andruavUnitFightModeUpdated, this, EVT_andruavUnitFightModeUpdated);
 		js_eventEmitter.fn_subscribe(js_event.EE_andruavUnitVehicleTypeUpdated, this, EVT_andruavUnitVehicleTypeUpdated);
+		js_eventEmitter.fn_subscribe(js_event.EE_unitOnlineChanged, this, EVT_unitOnlineChanged);
 
 		js_eventEmitter.fn_subscribe(js_event.EE_unitSDRTrigger, this, EVT_andruavUnitSDRTrigger);
 
@@ -3238,17 +3294,23 @@ function fn_connectWebSocket(me) {
 
 
 export function fn_logout() {
+	fn_resetMapAutoCenterState();
+	js_globals.v_connectState = false;
+	v_wsReconnectAttempts = 0;
+	fn_clearWsReconnectTimer();
+	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
 	js_andruavAuth.fn_retryLogin(false);
 	js_andruavAuth.fn_do_logoutAccount();
 	js_andruav_ws.AndruavClientWS.API_delMe();
 }
 
 export function fn_connect(p_email, p_access_code) {
+	js_globals.v_connectState = true;
 	if (js_andruav_ws.AndruavClientWS.isSocketConnectionDone() === true) {
 		fn_logout();
 	}
 	else {
-		fn_login(p_email, p_access_code);
+		fn_login(p_email, p_access_code, true, false);
 	}
 };
 
@@ -3311,7 +3373,6 @@ export function fn_on_ready() {
 	fn_on_ready_called = true;
 
 	$(function () {
-		$('head').append('<link href="/images/de/favicon.ico" rel="shortcut icon" type="image/x-icon" />');
 		$(document).prop('title', js_siteConfig.CONST_TITLE);
 	});
 
@@ -3350,10 +3411,6 @@ export function fn_on_ready() {
 
 		$('#btn_showVideo').click(
 			fn_showVideoMainTab
-		);
-
-		$('#btn_showControl').click(
-			fn_showControl
 		);
 
 

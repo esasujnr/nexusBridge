@@ -3,7 +3,7 @@ import { withTranslation } from 'react-i18next';
 import * as js_helpers from '../../js/js_helpers.js';
 import { js_globals } from '../../js/js_globals.js';
 import { mavlink20 } from '../../js/js_mavlink_v2.js';
-import { hlp_getFlightMode, fn_switchGPS, fn_openFenceManager, fn_isBadFencing } from '../../js/js_main.js';
+import { hlp_getFlightMode, fn_switchGPS, fn_isBadFencing } from '../../js/js_main.js';
 import * as js_andruavUnit from '../../js/js_andruavUnit.js';
 import * as js_andruavMessages from '../../js/protocol/js_andruavMessages';
 import ClssCtrlUDPPoxyTelemetry from '../gadgets/jsc_ctrl_udp_proxy_telemetry.jsx';
@@ -130,10 +130,13 @@ class ClssCtrlDroneIMU extends React.Component {
         let wpdst_text;
         let v_flyingTime = " ";
         let v_totalFlyingTime = " ";
+        const flightDurationSec = Number(v_andruavUnit.m_FlyingLastStartTime || 0);
+        const totalFlightDurationSec = Number(v_andruavUnit.m_FlyingTotalDuration || 0);
+        const hasFlightHistory = flightDurationSec > 0 || totalFlightDurationSec > 0;
 
         if (v_andruavUnit.m_isFlying === true) {
-            if (v_andruavUnit.m_FlyingLastStartTime !== null && v_andruavUnit.m_FlyingLastStartTime !== undefined) {
-                v_flyingTime = js_helpers.fn_getTimeDiffDetails_Shortest(v_andruavUnit.m_FlyingLastStartTime);
+            if (flightDurationSec > 0) {
+                v_flyingTime = js_helpers.fn_getTimeDiffDetails_Shortest(flightDurationSec);
             }
             if (v_andruavUnit.m_VehicleType === js_andruavUnit.VEHICLE_SUBMARINE) {
                 v_flight_status_text = t('unit_control_imu:flight.diving');
@@ -142,12 +145,18 @@ class ClssCtrlDroneIMU extends React.Component {
             }
             v_flight_status_class = "bg-danger text-white cursor_hand";
         } else {
-            v_flight_status_text = t('unit_control_imu:flight.onGround');
-            v_flight_status_class = "bg-success text-white";
+            if (hasFlightHistory) {
+                const latestCompletedFlightSec = flightDurationSec > 0 ? flightDurationSec : totalFlightDurationSec;
+                v_flight_status_text = t('unit_control_imu:flight.lastFlight', { defaultValue: 'Last Flight' });
+                v_flight_status_class = "bg-primary text-white";
+                v_flyingTime = js_helpers.fn_getTimeDiffDetails_Shortest(latestCompletedFlightSec);
+            } else {
+                v_flight_status_text = t('unit_control_imu:flight.onGround');
+                v_flight_status_class = "bg-success text-white";
+            }
         }
 
-        const c_delta = v_andruavUnit.m_FlyingLastStartTime === 0 ? 0.0 : v_andruavUnit.m_FlyingLastStartTime;
-        v_totalFlyingTime = js_helpers.fn_getTimeDiffDetails_Shortest(c_delta + v_andruavUnit.m_FlyingTotalDuration);
+        v_totalFlyingTime = js_helpers.fn_getTimeDiffDetails_Shortest(flightDurationSec + totalFlightDurationSec);
 
 
         if (v_andruavUnit.m_Nav_Info.p_Orientation.yaw == null) {
@@ -266,9 +275,8 @@ class ClssCtrlDroneIMU extends React.Component {
                     <div key="fence" className="col-6 col-md-3 user-select-none p-1">
                         <p
                             id="fence"
-                            className={'rounded-3 textunit_att_btn text-center cursor_hand p-1 ' + v_fence_class}
+                            className={'rounded-3 textunit_att_btn text-center p-1 ' + v_fence_class}
                             title={t('unit_control_imu:fence.title')}
-                            onClick={(e) => fn_openFenceManager(v_andruavUnit.getPartyID())}
                         >
                             {v_fence_text}
                         </p>

@@ -136,7 +136,7 @@ const fn_main = async () => {
         headers: {
             'Content-Type': 'application/json',
             'Accept': '*/*',
-            'User-Agent': 'DroneEngage-AuthSample/0.1.0',
+            'User-Agent': 'NexusBridge-AuthSample/0.1.0',
         },
         body: JSON.stringify(payload),
     });

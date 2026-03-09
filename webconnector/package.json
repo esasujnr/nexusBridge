@@ -1,7 +1,7 @@
 {
   "name": "droneengage-webconnector",
   "version": "0.1.2",
-  "description": "DroneEngage Web Connector - Bridge between DroneEngage cloud and local web clients",
+  "description": "Nexus Bridge Web Connector - Bridge between Nexus Bridge cloud and local web clients",
   "main": "src/index.js",
   "bin": {
     "droneengage-webconnector": "src/index.js",

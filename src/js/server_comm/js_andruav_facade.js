@@ -1150,6 +1150,14 @@ class CAndruavClientFacade {
 
 
 
+    API_startTelemetry(p_andruavUnit) {
+        if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+
+        const cmd = CCommandAPI.API_startTelemetry(p_andruavUnit);
+        js_andruav_ws.AndruavClientWS.API_sendCMD(p_andruavUnit.getPartyID(), cmd.mt, cmd.ms);
+    };
+
+
     API_resumeTelemetry(p_andruavUnit) {
         if (p_andruavUnit === null || p_andruavUnit === undefined) return;
 

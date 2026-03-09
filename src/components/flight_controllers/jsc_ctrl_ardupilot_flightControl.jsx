@@ -810,6 +810,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
     render ()
     {
         const btn = this.hlp_getflightButtonStyles(this.props.v_andruavUnit);
+        const armButtonLabel = this.props.v_andruavUnit.m_isArmed === true ? 'Disarm' : 'Arm';
         let ctrl=[];
         const hasSameTypeUnits = this.state.m_hasSameTypeUnits;
         
@@ -819,7 +820,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
             case js_andruavUnit.VEHICLE_TRI:
     {
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
-                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;ARM&nbsp;</button>
+                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;{armButtonLabel}&nbsp;</button>
                     <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ (e) => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ (e) => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ (e) => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
@@ -857,7 +858,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
             case  js_andruavUnit.VEHICLE_PLANE:
                 {
                 ctrl.push(<div key={this.props.id+"rc1"} id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap'>
-                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power ' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;ARM&nbsp;</button>
+                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power ' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;{armButtonLabel}&nbsp;</button>
                     <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ (e) => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ (e) => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ (e) => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
@@ -899,7 +900,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
             default:
                 {
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap'>
-                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;ARM&nbsp;</button>
+                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-power' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;{armButtonLabel}&nbsp;</button>
                     <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ (e) => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ (e) => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ (e) => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>

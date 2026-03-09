@@ -7,6 +7,9 @@ class GLOBALS {
 		this.m_andruavUnitList = null;
 		// auto connect variables
 		this.v_connectRetries = 5;
+		this.v_connectState = false;
+		this.v_connectTraceId = null;
+		this.v_connectTraceSeq = 0;
 
 		this.v_map_shapes = [];
 
@@ -70,8 +73,6 @@ class GLOBALS {
 		this.CONST_DFM_FAR = 3000; // more than 10 Km is far.
 		this.CONST_DFM_SAFE = 1000; // less than 1 Km is safe.
 		this.CONST_MAX_MESSAGE_LOG = 100;
-
-		this.v_displayMode = 0;
 
 		// Metric System        
 		this.v_useMetricSystem = true;
@@ -176,7 +177,6 @@ class GLOBALS {
 		this.LS_LANG = '_vLang';
 		this.LS_WEB_GCS = 'WEB_GCS_';
 		this.LS_ACCESS_CODE = '_vAccessCode';
-		this.LS_DISPLAY_MODE = '_vDisplayMode';
 		this.LS_GAME_PAD_MODE = 'gamepad_mode_';
 		this.LS_GAME_PAD_CONFIG_PREFIX = 'gamepad_config_';
 		this.LS_GAME_PAD_CONFIG_INDEX = '_vv_gamePadConfigIndex';
@@ -187,7 +187,6 @@ class GLOBALS {
 		this.LS_METRIC_SYS = '_vv_useMetricSystem';
 		this.LS_SHOW_ME_GCS = '_vGCSShowMe';
 		this.LS_UNIT_SORTED_ENABLED = '_vUnitSortEnabled';
-		this.LS_SELECTED_THEME = '_vSelectedTheme';
 		this.LS_WEBCONNECTOR_ENABLED = '_vWSPluginEnabled';
 
 

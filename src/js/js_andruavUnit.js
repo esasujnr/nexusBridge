@@ -635,6 +635,8 @@ class C_Telemetry {
     this.m_udpProxy_port = 0;
     this.m_udpProxy_active = false;
     this.m_udpProxy_paused = false;
+    this.m_udpProxy_recovery_state = 'idle';
+    this.m_udpProxy_status_note = '';
   }
 
   fn_getManualTXBlockedSubAction() {
@@ -1133,7 +1135,7 @@ export class CAndruavUnitObject {
     this.m_defined = false;
     this.m_IsMe = false;
     this.m_IsGCS = true;
-    this.#m_isDE = false; // is Drone Engage
+    this.#m_isDE = false; // is Nexus Bridge
     this.Description = "";
     this.m_inZone = null; // name of A ZONE  that the unit is IN.
     this.m_unitName = "unknown";

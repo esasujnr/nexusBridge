@@ -342,6 +342,7 @@ export class ClssCtrlPx4FlightControl extends React.Component {
     render ()
     {
         let btn = this.hlp_getflightButtonStyles(this.props.v_andruavUnit);
+        const armButtonLabel = this.props.v_andruavUnit.m_isArmed === true ? 'Disarm' : 'Arm';
         let ctrl=[];
         
 
@@ -349,7 +350,7 @@ export class ClssCtrlPx4FlightControl extends React.Component {
         {
             default:
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
-                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;ARM&nbsp;</button>
+                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;{armButtonLabel}&nbsp;</button>
                     <button id='btn_auto_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_takeoff_class}  onClick={ () => this.fn_doTakeoff(this.props.v_andruavUnit)}>&nbsp;Takeoff&nbsp;</button>
                     <button id='btn_auto_vtol_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_vtol_takeoff_class}  title='VTOL-Takeoff' onClick={ () => this.fn_doVtolTakeOff(this.props.v_andruavUnit)}>&nbsp;V-TkOff&nbsp;</button>
                     <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn '  + btn.btn_climb_class } onClick={ (e) => fn_changeAltitude(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>

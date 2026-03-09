@@ -1,12 +1,5 @@
 {
-  "title": "ESDroneEngage",
-  "header.home": "Inicio",
-  "header.planner": "Plan",
-  "header.wiki": "Wiki",
-  "header.faq": "FAQ",
-  "header.contact": "Contact",
-  "header.andruavApk": "Andruav APK",
-  "header.account": "Cuenta",
+  "title": "Nexus Bridge",
   "armed": "Armado",
   "disarmed": "Desarmado",
   "flying": "Volando",

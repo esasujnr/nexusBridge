@@ -4,6 +4,7 @@ import { js_globals } from '../../js/js_globals';
 import { EVENTS as js_event } from '../../js/js_eventList.js';
 import { js_eventEmitter } from '../../js/js_eventEmitter';
 import { js_andruavAuth } from '../../js/js_andruav_auth';
+import { fn_recoverTelemetry } from '../../js/js_main';
 
 class ClssCtrlUDPPoxyTelemetry extends React.Component {
   constructor(props) {
@@ -71,6 +72,16 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     if (p_andruavUnit == null) return;
     js_globals.v_andruavFacade.API_resumeTelemetry(p_andruavUnit);
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
+  }
+
+  fn_recoverTelemetry(p_andruavUnit) {
+    if (p_andruavUnit == null) return;
+    fn_recoverTelemetry(p_andruavUnit, {
+      reason: 'manual_refresh',
+      maxAttempts: 2,
+      pollMs: 1200,
+      force: true,
+    });
   }
 
   renderUdpProxy() {
@@ -152,6 +163,8 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
       );
     } else {
       v_telemetry_lvl_class = 'txt-theme-aware';
+      const statusNote = v_andruavUnit.m_Telemetry.m_udpProxy_status_note || '';
+      const isRecovering = v_andruavUnit.m_Telemetry.m_udpProxy_recovery_state === 'recovering';
       v_udp_data.push(
         <div key={v_andruavUnit.getPartyID() + 'refresh'} className="col-12 padding_zero css_user_select_text">
           <div className="css_margin_zero user-select-none">
@@ -159,10 +172,20 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
               id="udp_get"
               className="bg-warning cursor_hand rounded-3 textunit_w135 text-center user-select-none txt-theme-aware"
               title={t('udpProxyTelemetry:refreshTitle')}
-              onClick={(e) => this.fn_requestUdpProxyStatus(v_andruavUnit)}
+              onClick={(e) => this.fn_recoverTelemetry(v_andruavUnit)}
             >
               {t('udpProxyTelemetry:udpRefresh')}
             </p>
+            {isRecovering && (
+              <p className="si-07x css_margin_zero text-info">
+                {t('udpProxyTelemetry:recovering')}
+              </p>
+            )}
+            {statusNote === 'drone-side-inactive' && (
+              <p className="si-07x css_margin_zero text-warning">
+                {t('udpProxyTelemetry:droneSideInactive')}
+              </p>
+            )}
           </div>
         </div>
       );

@@ -4,6 +4,8 @@
   "pauseTitle": "Pause Telemetry",
   "activateTitle": "Activate Telemetry",
   "refreshTitle": "Click to get UDP Info",
+  "recovering": "Recovering telemetry...",
+  "droneSideInactive": "Drone-side proxy inactive. Restart telemetry service on drone if this persists.",
   "decreaseTitle": "Decrease message/sec",
   "increaseTitle": "Increase message/sec",
   "levelLabel": "LVL: {{level}}",

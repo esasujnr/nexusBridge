@@ -61,14 +61,32 @@ class ClssStreamChannel extends React.Component {
     fn_videoStream()
     {
         const v_track = this.props.prop_session.m_unit.m_Video.m_videoTracks[this.props.prop_track_number];
-        fn_VIDEO_login (this.props.prop_session, v_track.id);
+        try
+        {
+            fn_VIDEO_login (this.props.prop_session, v_track.id);
+        }
+        finally
+        {
+            if (typeof this.props.onActionComplete === 'function') {
+                this.props.onActionComplete();
+            }
+        }
     }
 
     fn_videoRecord(p_startRecord)
     {
         const v_track = this.props.prop_session.m_unit.m_Video.m_videoTracks[this.props.prop_track_number];
-        fn_VIDEO_Record (this.props.prop_session, v_track.id, p_startRecord);
-        toggleRecrodingVideo (this.props.prop_session.m_unit);
+        try
+        {
+            fn_VIDEO_Record (this.props.prop_session, v_track.id, p_startRecord);
+            toggleRecrodingVideo (this.props.prop_session.m_unit);
+        }
+        finally
+        {
+            if (typeof this.props.onActionComplete === 'function') {
+                this.props.onActionComplete();
+            }
+        }
     }
 
     componentWillUnmount () 
@@ -139,8 +157,11 @@ export default class ClssStreamDialog extends React.Component
         this.m_flag_mounted = false;
 
         this.key = Math.random().toString();
-        
+        this.m_dialogVisible = false;
+        this.m_clickListenerAttached = false;
+
         this.modal_ctrl_stream_dlg  = React.createRef();
+        this.fn_handleWindowClick = this.fn_handleWindowClick.bind(this);
 
         js_eventEmitter.fn_subscribe(js_event.EE_displayStreamDlgForm,this, this.fn_displayDialog);
         js_eventEmitter.fn_subscribe(js_event.EE_hideStreamDlgForm,this, this.fn_closeDialog);
@@ -153,6 +174,7 @@ export default class ClssStreamDialog extends React.Component
     {
         js_eventEmitter.fn_unsubscribe(js_event.EE_displayStreamDlgForm,this);
         js_eventEmitter.fn_unsubscribe(js_event.EE_hideStreamDlgForm,this);
+        this.fn_detachWindowClickListener();
     } 
 
     componentDidMount () {
@@ -169,6 +191,34 @@ export default class ClssStreamDialog extends React.Component
         p_me.setState({'m_update': p_me.state.m_update +1});
         
         p_me.modal_ctrl_stream_dlg.current.style.display = 'block';
+        p_me.m_dialogVisible = true;
+
+        // Delay listener attach so opening click does not instantly close dialog.
+        setTimeout(() => {
+            if (p_me.m_dialogVisible === true) {
+                p_me.fn_attachWindowClickListener();
+            }
+        }, 0);
+    }
+
+    fn_handleWindowClick()
+    {
+        if (this.m_dialogVisible === false) return;
+        this.fn_closeDialog();
+    }
+
+    fn_attachWindowClickListener()
+    {
+        if (this.m_clickListenerAttached === true) return;
+        document.addEventListener('click', this.fn_handleWindowClick);
+        this.m_clickListenerAttached = true;
+    }
+
+    fn_detachWindowClickListener()
+    {
+        if (this.m_clickListenerAttached !== true) return;
+        document.removeEventListener('click', this.fn_handleWindowClick);
+        this.m_clickListenerAttached = false;
     }
 
     fn_initDialog()
@@ -188,11 +238,14 @@ export default class ClssStreamDialog extends React.Component
     fn_gotoUnitPressed()
     {
         fn_gotoUnit_byPartyID(this.state.p_session.m_unit.getPartyID());
+        this.fn_closeDialog();
 
     }
 
     fn_closeDialog()
     {
+        this.m_dialogVisible = false;
+        this.fn_detachWindowClickListener();
         this.modal_ctrl_stream_dlg.current.style.opacity = '';
         this.modal_ctrl_stream_dlg.current.style.display = 'none';
         if ((this.state !== null && this.state !== undefined) && (this.state.hasOwnProperty('p_session') === true))
@@ -256,7 +309,7 @@ export default class ClssStreamDialog extends React.Component
                     ) : (
                         <div className='row'>
                             {this.state.p_session.m_unit.m_Video.m_videoTracks.map((_, i) => (
-                                <ClssStreamChannel key={i} prop_session={this.state.p_session} prop_track_number={i} />
+                                <ClssStreamChannel key={i} prop_session={this.state.p_session} prop_track_number={i} onActionComplete={() => this.fn_closeDialog()} />
                             ))}
                         </div>
                     )}

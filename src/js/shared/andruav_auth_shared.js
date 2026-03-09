@@ -43,7 +43,7 @@ export const fn_buildLoginPayload = (email, accessCode, ver, group = '1') => {
         [js_andruavMessages.CONST_APP_GROUP_PARAMETER]: group,
         [js_andruavMessages.CONST_APP_NAME_PARAMETER]: 'de',
         [js_andruavMessages.CONST_APP_VER_PARAMETER]: ver,
-        [js_andruavMessages.CONST_EXTRA_PARAMETER]: 'DRONE ENGAGE Web Client',
+        [js_andruavMessages.CONST_EXTRA_PARAMETER]: 'NEXUS BRIDGE Web Client',
         [js_andruavMessages.CONST_ACTOR_TYPE]: 'g',
     };
 };
@@ -53,7 +53,7 @@ export const fn_buildPluginSessionPayload = (ver, group = '1') => {
         [js_andruavMessages.CONST_APP_GROUP_PARAMETER]: group,
         [js_andruavMessages.CONST_APP_NAME_PARAMETER]: 'de',
         [js_andruavMessages.CONST_APP_VER_PARAMETER]: ver,
-        [js_andruavMessages.CONST_EXTRA_PARAMETER]: 'DRONE ENGAGE Web Client',
+        [js_andruavMessages.CONST_EXTRA_PARAMETER]: 'NEXUS BRIDGE Web Client',
         [js_andruavMessages.CONST_ACTOR_TYPE]: 'g',
     };
 };

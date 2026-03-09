@@ -40,6 +40,18 @@ const c_SOCKET_STATUS = [
     'Error'
 ];
 
+const fn_ws_diag = (stage, data = {}) => {
+    try {
+        console.info('[DIAG][WS]', {
+            traceId: js_globals.v_connectTraceId || 'na',
+            stage: stage,
+            ...data,
+        });
+    } catch {
+        return;
+    }
+};
+
 class CAndruavClientWS {
 
 
@@ -205,9 +217,14 @@ class CAndruavClientWS {
     }
 
     fn_disconnect(p_accesscode) {
-
-        this.ws.close();
-        this.ws = null;
+        if (this.ws) {
+            try {
+                this.ws.close();
+            } catch (error) {
+                console.warn('[WS] close during disconnect failed', error);
+            }
+            this.ws = null;
+        }
 
     };
 
@@ -234,7 +251,7 @@ class CAndruavClientWS {
         }
     };
 
-    setSocketStatus(status) {
+    setSocketStatus(status, details = null) {
         // MOVE LOGIC TO js_main 
         this.socketStatus = status;
 
@@ -255,9 +272,13 @@ class CAndruavClientWS {
             js_andruav_facade.AndruavClientFacade.API_requestID();
 
         } else {
-            clearInterval(this.m_timer_id);
+            this._clearTimer();
         }
-        js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus2, { status: status, name: c_SOCKET_STATUS[status - 1] });
+        js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus2, {
+            status: status,
+            name: c_SOCKET_STATUS[status - 1],
+            ...(details || {}),
+        });
     };
 
     getSocketStatus() {
@@ -367,24 +388,31 @@ class CAndruavClientWS {
 
             let url = null;
             const lsPluginEnabled = js_localStorage.fn_getWebConnectorEnabled();
-            const usePlugin = (lsPluginEnabled !== null) ? lsPluginEnabled : (js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true);
+            const pluginConfigured = js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true;
+            const usePlugin = pluginConfigured && ((lsPluginEnabled !== null) ? lsPluginEnabled : true);
             const isPluginTarget = usePlugin === true;
             const pluginApiKey = (usePlugin === true) ? js_siteConfig.CONST_WEBCONNECTOR_APIKEY : '';
             const pluginApiKeyQS = (pluginApiKey && pluginApiKey.length > 0) ? ('&k=' + encodeURIComponent(pluginApiKey)) : '';
+            const serverHost = String(this.m_server_ip || '').trim().toLowerCase();
+            const isLocalServer = serverHost === 'localhost' || serverHost === '127.0.0.1' || serverHost === '::1';
+            let selectedPort = this.m_server_port;
+            let selectedProtocol = 'ws';
 
             if (usePlugin === true) {
-                const wsProtocol = js_siteConfig.CONST_WEBCONNECTOR_SECURE === true ? 'wss' : 'ws';
-                const port = this.m_server_port;
-                url = wsProtocol + '://' + this.m_server_ip + ':' + port + '?f=' + this.server_AuthKey + '&s=' + this.partyID + '&at=g' + pluginApiKeyQS;
+                selectedProtocol = js_siteConfig.CONST_WEBCONNECTOR_SECURE === true ? 'wss' : 'ws';
+                selectedPort = this.m_server_port;
+                url = selectedProtocol + '://' + this.m_server_ip + ':' + selectedPort + '?f=' + this.server_AuthKey + '&s=' + this.partyID + '&at=g' + pluginApiKeyQS;
             } else {
-                if (window.location.protocol === 'https:') {
-                    // f: CONST_CS_LOGIN_TEMP_KEY
-                    // g: CONST_CS_SERVER_PUBLIC_HOST
-                    // s: SID
-                    url = 'wss://' + this.m_server_ip + ':' + this.m_server_port_ss + '?f=' + this.server_AuthKey + '&s=' + this.partyID + '&at=g';
+                // Cloud path: force secure websocket for non-local hosts.
+                const useSecureCloudSocket = (isLocalServer !== true);
+                if (useSecureCloudSocket || window.location.protocol === 'https:') {
+                    selectedProtocol = 'wss';
+                    selectedPort = this.m_server_port_ss;
                 } else {
-                    url = 'ws://' + this.m_server_ip + ':' + this.m_server_port + '?f=' + this.server_AuthKey + '&s=' + this.partyID + '&at=g';
+                    selectedProtocol = 'ws';
+                    selectedPort = this.m_server_port;
                 }
+                url = selectedProtocol + '://' + this.m_server_ip + ':' + selectedPort + '?f=' + this.server_AuthKey + '&s=' + this.partyID + '&at=g';
             }
 
             try {
@@ -395,15 +423,23 @@ class CAndruavClientWS {
                     usePlugin: usePlugin === true,
                     isPluginTarget: isPluginTarget === true,
                     host: this.m_server_ip,
-                    port: this.m_server_port,
+                    port: selectedPort,
+                    protocol: selectedProtocol,
                     hasPluginApiKey: (pluginApiKey && pluginApiKey.length > 0),
                     url: safeUrl,
+                });
+                fn_ws_diag('connect_begin', {
+                    host: this.m_server_ip,
+                    port: selectedPort,
+                    protocol: selectedProtocol,
+                    plugin: usePlugin === true,
                 });
             } catch {
             }
 
             if ("WebSocket" in window) {
                 //TODO: HANDLE if WS is not responding.
+                this.setSocketStatus(js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING);
                 this.ws = new WebSocket(url);
                 this.ws.binaryType = 'arraybuffer'; // Set to receive binary as ArrayBuffer for efficiency
                 this.ws.parent = this;
@@ -429,6 +465,10 @@ class CAndruavClientWS {
                     try {
                         console.info('[WS] open', {
                             readyState: Me.ws ? Me.ws.readyState : null,
+                            host: Me.m_server_ip,
+                            port: Me.m_server_port,
+                        });
+                        fn_ws_diag('open', {
                             host: Me.m_server_ip,
                             port: Me.m_server_port,
                         });
@@ -468,11 +508,23 @@ class CAndruavClientWS {
 
                 // OnClose callback of websocket
                 this.ws.onclose = function (evt) {
-                    Me.setSocketStatus(js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED);
+                    const details = {
+                        closeCode: evt ? evt.code : null,
+                        closeReason: evt ? evt.reason : null,
+                        wasClean: evt ? evt.wasClean : null,
+                    };
+                    Me.setSocketStatus(js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED, details);
                     js_eventEmitter.fn_dispatch(js_event.EE_WS_CLOSE, null);
 
                     try {
                         console.warn('[WS] close', {
+                            host: Me.m_server_ip,
+                            port: Me.m_server_port,
+                            code: evt ? evt.code : null,
+                            reason: evt ? evt.reason : null,
+                            wasClean: evt ? evt.wasClean : null,
+                        });
+                        fn_ws_diag('close', {
                             host: Me.m_server_ip,
                             port: Me.m_server_port,
                             code: evt ? evt.code : null,
@@ -484,13 +536,20 @@ class CAndruavClientWS {
                 };
 
                 this.ws.onerror = function (err) {
-                    Me.setSocketStatus(js_andruavMessages.CONST_SOCKET_STATUS_ERROR);
+                    Me.setSocketStatus(js_andruavMessages.CONST_SOCKET_STATUS_ERROR, {
+                        errorKind: 'ws_error',
+                    });
 
                     try {
                         console.error('[WS] error', {
                             host: Me.m_server_ip,
                             port: Me.m_server_port,
                             err: err,
+                        });
+                        fn_ws_diag('error', {
+                            host: Me.m_server_ip,
+                            port: Me.m_server_port,
+                            message: err && err.message ? err.message : 'WebSocket error event',
                         });
                     } catch {
                     }

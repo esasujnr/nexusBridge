@@ -4,6 +4,7 @@ import { withTranslation } from 'react-i18next';
 import * as js_helpers from '../../js/js_helpers.js'
 import * as js_andruavUnit from '../../js/js_andruavUnit.js';
 import * as js_common from '../../js/js_common.js'
+import { fn_getUnitColorPalette } from '../../js/js_unit_colors.js';
 
 import { js_globals } from '../../js/js_globals.js';
 import { EVENTS as js_event } from '../../js/js_eventList.js'
@@ -166,6 +167,7 @@ class ClssCtrlUnitMainBar extends React.Component {
     let v_andruavUnit = this.props.p_unit;
 
     if (!v_andruavUnit) return null;
+    const unitColor = fn_getUnitColorPalette(v_andruavUnit).primary;
 
     let online_comment = t('unitBar:noSignalInfo'); // "no signal info"
     let online_class;
@@ -311,7 +313,7 @@ class ClssCtrlUnitMainBar extends React.Component {
             title={module_version}
             onClick={() => fn_changeUnitInfo(v_andruavUnit)}
           >
-            <strong>{v_andruavUnit.m_unitName} </strong>
+            <strong style={{ color: unitColor }}>{v_andruavUnit.m_unitName} </strong>
             {sys_id}
             <span className={' ' + online_class}>{online_text}</span>
           </p>
@@ -344,7 +346,7 @@ class ClssCtrlUnitMainBar extends React.Component {
             title={module_version}
             onClick={() => fn_changeUnitInfo(v_andruavUnit)}
           >
-            <strong>{v_andruavUnit.m_unitName + ' '}</strong>
+            <strong style={{ color: unitColor }}>{v_andruavUnit.m_unitName + ' '}</strong>
             <span className={' ' + online_class}>{online_text}</span>
           </p>
         </div>

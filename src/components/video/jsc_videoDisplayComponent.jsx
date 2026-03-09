@@ -149,8 +149,68 @@ export class ClssCVideoControl extends React.Component {
         if (len === 0) {
             return (
                 <div className="container-fluid localcontainer">
-                    <div className="d-flex justify-content-center align-items-center" style={{ minHeight: '200px' }}>
-                        <div> No Camera Active</div>
+                    <ul className="nav nav-tabs">
+                        <li className="nav-item">
+                            <a className="nav-link user-select-none txt-theme-aware active show" data-bs-toggle="tab" href="#cam_placeholder">
+                                Camera
+                            </a>
+                        </li>
+                    </ul>
+                    <div id={this.key + "videoTabContent"} className="tab-content">
+                        <div id="cam_placeholder" className="css_videoScreen tab-pane fade active show" style={{ position: 'relative' }}>
+                            <h4 className="bg-primary txt-theme-aware">Camera Output</h4>
+                            <div id="css_video_ctrl_panel" className="d-flex flex-row css_padding_zero" style={{ opacity: 0.5, pointerEvents: 'none' }}>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_video_close" alt="Close Camera" title="Close Camera" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_goto_drone" alt="Goto Agent" title="Goto Agent" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_video_pip" alt="Picture in Picture" title="Picture in Picture" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_video_fullscreen" alt="Video Full Screen" title="Video Full Screen" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_camera_switch" alt="Switch Camera" title="Switch Camera" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_recvideo_ready" alt="Record Web" title="Record Web" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_camera_ready" alt="Take Snapshot" title="Take Snapshot" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <i className="bi-zoom-in css_large_icon text-success"></i>
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <i className="bi-zoom-out css_large_icon text-success"></i>
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_camera_mirrorX" alt="Mirror" title="Mirror" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_camera_rotate" alt="Rotate" title="Rotate" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <img className="cursor_default css_camera_flash_off" alt="Flash" title="Flash" />
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <i className="bi bi-arrows-expand css_large_icon text-primary" title="Fit (Contain)"></i>
+                                </div>
+                                <div className="d-flex justify-content-center align-items-center p-0 m-0 ms-1">
+                                    <i className="bi bi-circle-half css_large_icon txt-theme-aware" title="Opacity"></i>
+                                </div>
+                            </div>
+                            <div id="css_tvideo-div-placeholder" className="css_videoContainer" style={{ minHeight: '420px' }}></div>
+                            <div
+                                className="txt-theme-aware text-center"
+                                style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}
+                            >
+                                <strong>No camera connected</strong>
+                            </div>
+                        </div>
                     </div>
                 </div>
             );

@@ -23,91 +23,60 @@ class ClssMainUnitPopup extends React.Component {
     }
   }
 
-  generatePopup() {
-    const { t } = this.props; // Access t function with unitPopup namespace
-    const c_unit = this.props.p_unit;
-    const markerContent = [];
-    let keyCounter = 0;
-
-    const armedBadge = c_unit.m_isArmed ? (
-      <span className="text-danger">&nbsp;<strong>{t('armed')}</strong>&nbsp;</span>
-    ) : (
-      <span key={this.key + 'ar1'} className="text-success">&nbsp;{t('disarmed')}&nbsp;</span>
-    );
-
-    const flying = c_unit.m_isFlying ? (
-      <span className="text-danger">&nbsp;{t('flying')}&nbsp;</span>
-    ) : (
-      <span key={this.key + 'ar2'} className="text-success">&nbsp;{t('onGround')}&nbsp;</span>
-    );
-
-    markerContent.push(
-      <p key={this.key + 'pop110'} className="m-0 p-0 txt-theme-aware bg-primary text-center">
-        <strong>{c_unit.m_unitName}</strong>
-      </p>
-    );
-    markerContent.push(
-      <p key={this.key + 'pop111'} className="m-0 p-0 width_fit_max">
-        {armedBadge} - {flying}
-      </p>
-    );
-
-    markerContent.push(
-      <p key={`${this.key}-${c_unit.m_IsGCS ? 'gcs' : 'flightmode'}-${keyCounter++}`} className="m-0">
-        {c_unit.m_IsGCS ? (
-          <span className="text-success">{t('groundControlStation')}</span>
-        ) : (
-          <strong className="text-success">{hlp_getFlightMode(c_unit)}</strong>
-        )}
-      </p>
-    );
-
-    const { alt_relative: vAlt, alt_abs: vAlt_abs, ground_speed: vSpeed, air_speed: vAirSpeed } = c_unit.m_Nav_Info.p_Location;
-
-    markerContent.push(
-      <p key={`${this.key}-altitude-${keyCounter++}`} className="m-0 p-0">
-        {vAlt !== null && vAlt !== undefined ? (
-          <span className="text-primary">
-            {vAlt.toFixed(0)}<span className="text-primary"> {t('meters')}</span>
-          </span>
-        ) : (
-          <span className="text-secondary">?</span>
-        )}
-        {vAlt_abs !== null && vAlt_abs !== undefined && (
-          <span>
-            <span className="text-primary">{t('absolute')}:</span> {vAlt_abs.toFixed(0)}
-          </span>
-        )}
-      </p>
-    );
-
-    const speedDisplay = (label, speed) => (
-      <p key={`${this.key}-${label}-${keyCounter++}`} className="m-0 p-0">
-        <span className="text-primary">{t(`${label}`)}:</span>
-        <span className="text-success">{speed !== null && speed !== undefined ? speed.toFixed(1) : '?'}</span>
-        <span className="text-primary"> {t('metersPerSecond')}</span>
-      </p>
-    );
-
-    markerContent.push(speedDisplay('groundSpeed', vSpeed));
-    markerContent.push(speedDisplay('airSpeed', vAirSpeed));
-
-    markerContent.push(
-      <p key={`${this.key}-location-${keyCounter++}`} className="m-0 p-0">
-        <span className="text-primary">{t('latitude')}:</span>
-        <span className="text-success">{this.props.p_lat.toFixed(6)}</span>
-        <span className="text-primary">, {t('longitude')}:</span>
-        <span className="text-success">{this.props.p_lng.toFixed(6)}</span>
-      </p>
-    );
-
-    return markerContent;
-  }
-
   render() {
+    const { t } = this.props;
+    const c_unit = this.props.p_unit;
+    const nav = c_unit && c_unit.m_Nav_Info ? c_unit.m_Nav_Info : {};
+    const loc = nav && nav.p_Location ? nav.p_Location : {};
+
+    const toNum = (value, digits = 1, fallback = '?') => (
+      Number.isFinite(value) ? value.toFixed(digits) : fallback
+    );
+
+    const armedClass = c_unit.m_isArmed ? 'nb-unit-popup__status--danger' : 'nb-unit-popup__status--ok';
+    const flyingClass = c_unit.m_isFlying ? 'nb-unit-popup__status--danger' : 'nb-unit-popup__status--ok';
+    const modeText = c_unit.m_IsGCS ? t('groundControlStation') : hlp_getFlightMode(c_unit);
+
+    const latText = Number.isFinite(this.props.p_lat) ? this.props.p_lat.toFixed(6) : '?';
+    const lngText = Number.isFinite(this.props.p_lng) ? this.props.p_lng.toFixed(6) : '?';
+
     return (
-      <div key={this.key + 'popmu'} className="width_fit_max">
-        {this.generatePopup()}
+      <div key={this.key + 'popmu'} className="nb-context-menu nb-unit-popup-menu col-12">
+        <div className="nb-context-menu__header">
+          <p className="nb-context-menu__title">{c_unit.m_unitName}</p>
+          <p className="nb-context-menu__coords">Lat {latText} | Lng {lngText}</p>
+        </div>
+
+        <div className="nb-context-card nb-unit-popup-card">
+          <p className="nb-unit-popup__status-line">
+            <span className={armedClass}>{c_unit.m_isArmed ? t('armed') : t('disarmed')}</span>
+            <span className="nb-unit-popup__sep">|</span>
+            <span className={flyingClass}>{c_unit.m_isFlying ? t('flying') : t('onGround')}</span>
+          </p>
+
+          <p className="nb-unit-popup__mode">{modeText}</p>
+
+          <p className="nb-unit-popup__line">
+            <span className="nb-unit-popup__label">Alt:</span>
+            <span className="nb-unit-popup__value">{toNum(loc.alt_relative, 0)}</span>
+            <span className="nb-unit-popup__label"> {t('meters')}</span>
+            <span className="nb-unit-popup__label nb-unit-popup__label--sub">{t('absolute')}:</span>
+            <span className="nb-unit-popup__value">{toNum(loc.alt_abs, 0)}</span>
+            <span className="nb-unit-popup__label"> {t('meters')}</span>
+          </p>
+
+          <p className="nb-unit-popup__line">
+            <span className="nb-unit-popup__label">{t('groundSpeed')}:</span>
+            <span className="nb-unit-popup__value">{toNum(loc.ground_speed, 1)}</span>
+            <span className="nb-unit-popup__label"> {t('metersPerSecond')}</span>
+          </p>
+
+          <p className="nb-unit-popup__line">
+            <span className="nb-unit-popup__label">{t('airSpeed')}:</span>
+            <span className="nb-unit-popup__value">{toNum(loc.air_speed, 1)}</span>
+            <span className="nb-unit-popup__label"> {t('metersPerSecond')}</span>
+          </p>
+        </div>
       </div>
     );
   }

@@ -3,6 +3,7 @@ import { EVENTS as js_event } from './js_eventList.js';
 import * as js_andruavMessages from './protocol/js_andruavMessages.js';
 import { js_eventEmitter } from './js_eventEmitter';
 import { js_localStorage } from './js_localStorage.js';
+import { js_globals } from './js_globals.js';
 import {
     fn_buildAuthUrl,
     fn_buildAuthUrlEx,
@@ -25,6 +26,18 @@ const ERROR_CODES = {
     UNKNOWN_ERROR: -4,
     NO_SESSION: -5,
     SSL_ERROR: -6,
+};
+
+const fn_auth_diag = (stage, data = {}) => {
+    try {
+        console.info('[DIAG][AUTH]', {
+            traceId: js_globals.v_connectTraceId || 'na',
+            stage: stage,
+            ...data,
+        });
+    } catch {
+        return;
+    }
 };
 
 /**
@@ -57,9 +70,13 @@ class CAndruavAuth {
     }
 
     fn_isPluginEnabled() {
+        if (js_siteConfig.CONST_WEBCONNECTOR_ENABLED !== true) return false;
+
         const v = js_localStorage.fn_getWebConnectorEnabled();
-        if (v !== null) return v;
-        return js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true;
+        if (v !== null) return v === true;
+
+        // If WebConnector is configured globally and no local preference exists, keep it enabled.
+        return true;
     }
 
     fn_getPluginAuthHost() {
@@ -201,22 +218,23 @@ class CAndruavAuth {
      * Builds the base URL for API requests.
      * @returns {string} The constructed URL.
      */
+    #isLocalHost(host) {
+        const h = String(host || '').trim().toLowerCase();
+        return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+    }
+
+    #shouldUseSecureAuth() {
+        return this.#isLocalHost(this.m_auth_ip) !== true;
+    }
+
     #getBaseUrl(path) {
-        const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-        if (protocol === 'http' && window.location.hostname !== 'localhost') {
-            console.warn('Using HTTP in production—switch to HTTPS for security');
-        }
-        return `${protocol}://${this.m_auth_ip}:${this._m_auth_port}${js_andruavMessages.CONST_WEB_FUNCTION}${path}`;
+        return fn_buildAuthUrl(this.#shouldUseSecureAuth(), this.m_auth_ip, this._m_auth_port, path);
     }
 
 
     #getHealthURL()
     {
-        const protocol = window.location.protocol === 'https:' ? 'https' : 'http';
-        if (protocol === 'http' && window.location.hostname !== 'localhost') {
-            console.warn('Using HTTP in production—switch to HTTPS for security');
-        }
-        return `${protocol}://${this.m_auth_ip}:${this._m_auth_port}${js_andruavMessages.CONST_HEALTH_FUNCTION}`;
+        return fn_buildHealthBaseUrl(this.#shouldUseSecureAuth(), this.m_auth_ip, this._m_auth_port);
     }
 
     /**
@@ -227,6 +245,10 @@ class CAndruavAuth {
      */
     async fn_do_loginAccount(p_userName, p_accessCode) {
         js_eventEmitter.fn_dispatch(js_event.EE_Auth_Login_In_Progress, null);
+        fn_auth_diag('login_begin', {
+            username: p_userName,
+            pluginConfigured: js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true,
+        });
 
         try {
             const lsPluginEnabled = js_localStorage.fn_getWebConnectorEnabled();
@@ -278,20 +300,11 @@ class CAndruavAuth {
 
         const probeResult = await this.fn_probeServer(this.#getHealthURL());
         if (!probeResult.success) {
-            this._m_logined = false;
-            const isSslError = probeResult.isSslError;
-            const errorCode = isSslError ? ERROR_CODES.SSL_ERROR : ERROR_CODES.NETWORK_ERROR;
-            const errorMessage = isSslError
-                ? 'SSL Error: Server certificate may be invalid. Please verify the server\'s HTTPS setup.'
-                : 'Network error: Unable to reach the server.';
-
-            js_eventEmitter.fn_dispatch(js_event.EE_Auth_BAD_Logined, {
-                e: errorCode,
-                em: errorMessage,
-                error: 'Probe failed',
-                ssl: isSslError,
+            // Probe can fail due to browser CORS/redirect handling; do not block real login attempt.
+            fn_auth_diag('probe_failed_but_continue', {
+                isSslError: probeResult.isSslError === true,
+                baseUrl: this.#getHealthURL(),
             });
-            return false;
         }
 
         try {
@@ -317,6 +330,10 @@ class CAndruavAuth {
 
                 this._m_permissions_ = parsed.permission;
                 this._m_perm = parsed.permission2 ?? DEFAULT_PERMISSIONS;
+                fn_auth_diag('login_success', {
+                    serverHost: parsed.commServerHost,
+                    serverPort: parsed.commServerPort,
+                });
                 js_eventEmitter.fn_dispatch(js_event.EE_Auth_Logined, parsed.raw);
                 return true;
             } else {
@@ -331,6 +348,10 @@ class CAndruavAuth {
                     e: response.e ?? ERROR_CODES.UNKNOWN_ERROR,
                     em: errorMessage,
                 });
+                fn_auth_diag('login_rejected', {
+                    code: response.e ?? ERROR_CODES.UNKNOWN_ERROR,
+                    message: errorMessage,
+                });
             }
         } catch (error) {
             this._m_logined = false;
@@ -342,6 +363,10 @@ class CAndruavAuth {
                 em: errorMessage,
                 error: error.message || 'Unknown error',
                 ssl: isSslError,
+            });
+            fn_auth_diag('login_exception', {
+                isSslError: isSslError,
+                message: error.message || 'Unknown error',
             });
             console.error('Login error:', error);
         }
@@ -374,14 +399,16 @@ class CAndruavAuth {
 
         const probeResult = await this.fn_probeServer(pluginHealthBaseUrl, headers);
         if (!probeResult.success) {
-            console.warn('[WebConnector] probe failed', {
+            // Probe can fail in browser environments even when login endpoint is reachable.
+            console.warn('[WebConnector] probe failed but continue', {
                 baseUrl: pluginHealthBaseUrl,
                 ssl: probeResult.isSslError === true,
             });
-            return false;
         }
 
-        console.info('[WebConnector] probe OK', { baseUrl: pluginHealthBaseUrl });
+        if (probeResult.success) {
+            console.info('[WebConnector] probe OK', { baseUrl: pluginHealthBaseUrl });
+        }
 
         try {
             this.m_username = p_userName;
@@ -463,12 +490,16 @@ class CAndruavAuth {
     async fn_probeServer(baseUrl, p_headers) {
         try {
             console.log('Probing URL:', `${baseUrl}/health`);
-            const response = await fetch(`${baseUrl}/health`, {
+            const options = {
                 method: 'GET', // Use GET for simplicity; HEAD is also viable
-                headers: p_headers || { 'Content-Type': 'application/json' },
                 mode: 'cors', // Use cors mode to access response status
                 signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT),
-            });
+            };
+            if (p_headers && Object.keys(p_headers).length > 0) {
+                options.headers = p_headers;
+            }
+
+            const response = await fetch(`${baseUrl}/health`, options);
             return { success: response.ok, isSslError: false };
         } catch (error) {
             console.error('Probe error:', error);
@@ -722,3 +753,4 @@ class CAndruavAuth {
 }
 
 export const js_andruavAuth = CAndruavAuth.getInstance();
+

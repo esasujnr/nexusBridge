@@ -50,7 +50,6 @@ These are practical “options you can change” without rebuilding the app.
 | `v_enable_unit_sort` | UI preference: auto-sort unit list. | `LS_UNIT_SORTED_ENABLED` |
 | `v_enable_gcs_display` | UI preference: show GCS units in UI lists. | `_vGCSDisplay` |
 | `LS_SHOW_ME_GCS` (via `js_localStorage.fn_setGCSShowMe`) | UI/network behavior preference related to showing this GCS. | `LS_SHOW_ME_GCS` |
-| `LS_SELECTED_THEME` | Selected UI theme name. | `LS_SELECTED_THEME` |
 
 ---
 

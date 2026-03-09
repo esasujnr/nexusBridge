@@ -125,15 +125,6 @@ class CLocalStorage {
         return this._getValue(js_globals.LS_GROUP_NAME, '1');
     }
 
-    // Display Mode
-    fn_setDisplayMode(value) {
-        this._setValue(js_globals.LS_DISPLAY_MODE, value);
-    }
-
-    fn_getDisplayMode() {
-        return parseInt(this._getValue(js_globals.LS_DISPLAY_MODE, 0));
-    }
-
     // Metric System
     fn_setMetricSystem(value) {
         this._setValue(js_globals.LS_METRIC_SYS, value.toString());
@@ -285,21 +276,17 @@ class CLocalStorage {
         return this._getValue('_vGCSDisplay', 'true') === 'true';
     }
 
-    // Selected Theme
-    fn_setSelectedTheme(value) {
-        this._setValue(js_globals.LS_SELECTED_THEME, value);
-    }
-
-    fn_getSelectedTheme() {
-        return this._getValue(js_globals.LS_SELECTED_THEME, 'default');
-    }
-
     fn_setWebConnectorEnabled(value) {
         this._setValue(js_globals.LS_WEBCONNECTOR_ENABLED, value === true ? 'true' : 'false');
     }
 
     fn_getWebConnectorEnabled() {
-        return this._getValue(js_globals.LS_WEBCONNECTOR_ENABLED, 'true') === 'true';
+        if (!this.isSupported()) return null;
+
+        const v = localStorage.getItem(js_globals.LS_WEBCONNECTOR_ENABLED);
+        if (v === null || v === undefined) return null;
+
+        return v === 'true';
     }
 }
 

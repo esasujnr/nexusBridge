@@ -224,7 +224,17 @@ class CAndruavClientParser {
     #prv_onNewUnitAdded(target) {
         js_andruav_facade.AndruavClientFacade.API_requestGeoFencesAttachStatus(target);
         js_andruav_facade.AndruavClientFacade.API_requestUdpProxyStatus(target);
-        js_andruav_facade.AndruavClientFacade.API_requestWayPoints(target);
+        // Pull mission directly from FCB so it is rendered on the map automatically after login.
+        js_andruav_facade.AndruavClientFacade.API_requestWayPoints(target, true);
+        // Retry once later because some units need extra time before FCB mission is ready after login.
+        const partyID = target?.getPartyID?.();
+        if (partyID) {
+            setTimeout(() => {
+                const refreshedUnit = js_globals.m_andruavUnitList.fn_getUnit(partyID);
+                if (!refreshedUnit || refreshedUnit.m_IsDisconnectedFromGCS === true) return;
+                js_andruav_facade.AndruavClientFacade.API_requestWayPoints(refreshedUnit, true);
+            }, 8000);
+        }
         //js_andruav_facade.AndruavClientFacade.API_requestIMU (target,true);  // NOT USED
     };
 
@@ -312,6 +322,10 @@ class CAndruavClientParser {
                 p_unit.m_Telemetry.m_udpProxy_port = p_jmsg.p;
                 p_unit.m_Telemetry.m_telemetry_level = p_jmsg.o;
                 p_unit.m_Telemetry.m_udpProxy_active = p_jmsg.en;
+                if (p_jmsg.en === true) {
+                    p_unit.m_Telemetry.m_udpProxy_recovery_state = 'idle';
+                    p_unit.m_Telemetry.m_udpProxy_status_note = '';
+                }
                 if (p_jmsg.hasOwnProperty('z')) {
                     p_unit.m_Telemetry.m_udpProxy_paused = p_jmsg.z;
                 }
@@ -1190,10 +1204,16 @@ class CAndruavClientParser {
         p_unit.m_isArmed = is_armed;
         p_unit.m_is_ready_to_arm = is_ready_to_arm;
 
+        let is_flying = p_unit.m_isFlying;
         if (p_jmsg.hasOwnProperty('FL')) {
-            triggers.onFlying = p_unit.m_isFlying !== p_jmsg.FL;
-            p_unit.m_isFlying = p_jmsg.FL;
+            is_flying = !!p_jmsg.FL;
         }
+        else if (is_armed === false) {
+            // Defensive fallback: if unit is disarmed and FL flag is absent, do not keep stale flying state.
+            is_flying = false;
+        }
+        triggers.onFlying = p_unit.m_isFlying !== is_flying;
+        p_unit.m_isFlying = is_flying;
 
         if (p_jmsg.z) p_unit.m_FlyingLastStartTime = p_jmsg.z / 1000;
         if (p_jmsg.a) p_unit.m_FlyingTotalDuration = p_jmsg.a / 1000;

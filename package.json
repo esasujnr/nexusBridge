@@ -2,7 +2,7 @@
   "name": "droneengage_webclient",
   "version": "2.0.0",
   "build_number": "20260207-02",
-  "description": "DroneEngage WebClient GCS Control Station.",
+  "description": "Nexus Bridge WebClient GCS Control Station.",
   "author": {
     "email": "mohammad.hefny@gmail.com",
     "name": "Mohammad Said Hefny",
@@ -51,7 +51,7 @@
     "underscore": "^1.13.6"
   },
   "scripts": {
-    "start": "export NODE_OPTIONS=--openssl-legacy-provider && HTTPS=true SSL_CRT_FILE=$WEB_SSL_KEY SSL_KEY_FILE=$WEB_SSL_KEY react-scripts start",
+   "start": "react-scripts start",
     "build": "react-scripts build --mode production --config-overrides ./webpack.config.js",
     "test": "react-scripts test",
     "eject": "react-scripts eject",

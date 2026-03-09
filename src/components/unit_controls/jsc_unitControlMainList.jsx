@@ -14,6 +14,7 @@ import {js_eventEmitter} from '../../js/js_eventEmitter.js'
 import * as js_andruavMessages from '../../js/protocol/js_andruavMessages'
 import {js_localStorage} from '../../js/js_localStorage.js'
 import {js_leafletmap} from '../../js/js_leafletmap.js'
+import { fn_getUnitColorPalette } from '../../js/js_unit_colors.js'
 
 
 
@@ -155,7 +156,8 @@ class ClssAndruavUnitList extends React.Component {
             && (v_andruavUnit.m_telemetry_protocol !== js_andruavMessages.CONST_TelemetryProtocol_CONST_Mavlink_Telemetry)))
             );
 
-        let classes = "";
+        let statusClass = "";
+        let warningIconClass = "";
         let text = v_andruavUnit.m_unitName;
         if (v_andruavUnit.m_FCBParameters.m_systemID !== 0)
         {
@@ -163,31 +165,31 @@ class ClssAndruavUnitList extends React.Component {
         }
         if ((v_andruavUnit.m_IsDisconnectedFromGCS === true) || (v_andruavUnit.m_IsShutdown === true))
         {
-            classes = " blink_offline ";
+            statusClass = " blink_offline ";
         }
         else
         {
             if (bad_fcb === true) 
             {
-                    classes = "blink_warning animate_iteration_5s bi bi-exclamation-diamond ";
-                    text = " " + text;
-                    
+                    statusClass = " blink_warning animate_iteration_5s ";
+                    warningIconClass = " bi bi-exclamation-diamond-fill blink_warning animate_iteration_5s ";
             }
             else 
             if (v_andruavUnit.m_isArmed === true) 
             {
-                classes = " blink_alert animate_iteration_3s";
+                statusClass = " blink_alert animate_iteration_3s";
             }
             else
             {
-                classes += " blink_success animate_iteration_3s ";
+                statusClass = " blink_success animate_iteration_3s ";
             }
 
             
         }
         return {
-            'classes': classes,
-            'text': text
+            statusClass: statusClass,
+            warningIconClass: warningIconClass,
+            text: text
         };
     }
     
@@ -245,11 +247,16 @@ class ClssAndruavUnitList extends React.Component {
                     { 
                         // Display in Tabs
                         const header_info = me.getHeaderInfo(v_andruavUnit);
+                        const unitColor = fn_getUnitColorPalette(v_andruavUnit).primary;
                         const c_active = me.state.m_active_partyID === v_andruavUnit.getPartyID();
                         units_header.push(
                             <li id={'h' + partyID} key={'h' + partyID} className="nav-item nav-units">
                                 <a 
-                                className={`nav-link user-select-none txt-theme-aware  ${c_active === true ? '' : ''}`} data-bs-toggle="tab" href={"#tab_" + v_andruavUnit.getPartyID()}><span className={header_info.classes}> {header_info.text}</span> </a>
+                                className={`nav-link user-select-none txt-theme-aware  ${c_active === true ? '' : ''}`} data-bs-toggle="tab" href={"#tab_" + v_andruavUnit.getPartyID()}>
+                                    <span className="unit-tab-title" style={{ color: unitColor }}>{header_info.text}</span>
+                                    <span className={'unit-tab-status-dot' + header_info.statusClass}>&#9679;</span>
+                                    {header_info.warningIconClass !== '' && <i className={header_info.warningIconClass}></i>}
+                                </a>
                             </li>
                         );
 

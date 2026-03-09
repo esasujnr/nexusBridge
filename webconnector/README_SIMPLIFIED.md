@@ -143,7 +143,7 @@ node src/index.js
 Expected output:
 ```
 =================================================
-DroneEngage WebClient Connector ver: 0.1.0
+Nexus Bridge WebClient Connector ver: 0.1.0
 =================================================
 Usage:
   droneengage-webconnector                    # Use config.json credentials

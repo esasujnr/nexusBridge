@@ -10,7 +10,7 @@ import { mavlink20 } from '../../js/js_mavlink_v2.js';
 
 import {
     fn_requestWayPoints,
-    fn_clearWayPoints, fn_putWayPoints
+    fn_clearWayPointsFromMap
 } from '../../js/js_main.js'
 
 import * as js_andruavMessages from '../../js/protocol/js_andruavMessages'
@@ -427,9 +427,8 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
 
 
         ctrl2_1.push(<div key={p_andruavUnit.getPartyID() + "rc3"} id='rc33' className='col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
-            <button id='btn_refreshwp' key={this.key + 'btn_refreshwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + btn.btn_load_wp_class} onClick={(e) => fn_requestWayPoints(p_andruavUnit, true)} title="Read Waypoints from Drone">&nbsp;R-WP</button>
-            <button id='btn_writewp' key={this.key + 'btn_writewp'} type='button' className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_save_wp_class} onClick={(e) => fn_putWayPoints(p_andruavUnit, true)} title="Write Waypoints into Drone">&nbsp;W-WP</button>
-            <button id='btn_clearwp' key={this.key + 'btn_clearwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_clear_wp_class} onClick={(e) => fn_clearWayPoints(p_andruavUnit)} title="Clear Waypoints" >&nbsp;C-WP</button>
+            <button id='btn_refreshwp' key={this.key + 'btn_refreshwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + btn.btn_load_wp_class} onClick={(e) => fn_requestWayPoints(p_andruavUnit, true)} title="Read Mission from Drone">&nbsp;R-WP</button>
+            <button id='btn_clearwp' key={this.key + 'btn_clearwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_clear_wp_class} onClick={(e) => fn_clearWayPointsFromMap(p_andruavUnit)} title="Clear Waypoints from Map" >&nbsp;C-WP</button>
             <button id='btn_webRX' key={this.key + 'btn_webRX'} type='button' className={'btn btn-sm flgtctrlbtn ' + btn.btn_rx_class} onClick={(e) => this.fn_webRX_toggle(p_andruavUnit)} title={`${btn.btn_rx_text}--${btn.btn_rx_title}`}>&nbsp;RX</button>
             <button id='btn_freezerx' key={this.key + 'btn_freezerx'} type='button' title="Freeze RemoteControl -DANGER-" className={'hidden btn btn-sm flgtctrlbtn ' + btn.btn_takeCTRL_class + cls_ctrl_modes} onClick={(e) => this.fn_takeTXCtrl(e, p_andruavUnit)}>&nbsp;TX-Frz&nbsp;</button>
             <button id='btn_releaserx' key={this.key + 'btn_releaserx'} type='button' title="Release Control" className={'btn btn-sm flgtctrlbtn ' + btn.btn_releaseCTRL_class + cls_ctrl_modes} onClick={(e) => this.fn_releaseTXCtrl(p_andruavUnit)}>&nbsp;TX-Rel&nbsp;</button>

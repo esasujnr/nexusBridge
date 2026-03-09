@@ -99,13 +99,13 @@ export default class ClssCVideoTrackerLayer extends React.Component {
         c_ctx.font = "bold 12px Arial";
         c_ctx.textAlign = "center";
         
-        // Style: Green dashed border with semi-transparent green background
-        c_ctx.strokeStyle = '#00FF00';
+        // Style: Blue dashed border with semi-transparent blue background
+        c_ctx.strokeStyle = '#2FA8FF';
         c_ctx.lineWidth = 2;
         c_ctx.setLineDash([6, 3]); 
 
         // Debug log to confirm new code is running
-        console.log("ClssCVideoTrackerLayer: drawing targets (Green)", p_targets);
+        console.log("ClssCVideoTrackerLayer: drawing targets (Blue)", p_targets);
 
         const c_list = p_targets.m_list;
         const c_len = c_list.length;
@@ -117,14 +117,14 @@ export default class ClssCVideoTrackerLayer extends React.Component {
             const c_y2 = p_target.y2 * cssHeight;
             
             // Draw background
-            c_ctx.fillStyle = 'rgba(0, 255, 0, 0.2)';
+            c_ctx.fillStyle = 'rgba(47, 168, 255, 0.2)';
             c_ctx.fillRect(c_x1, c_y1, c_x2, c_y2);
 
             // Draw border
             c_ctx.strokeRect(c_x1, c_y1, c_x2, c_y2);
             
             // Draw text
-            c_ctx.fillStyle = "yellow";
+            c_ctx.fillStyle = "#E1ECFC";
             c_ctx.fillText(p_target.m_name, c_x1 + c_x2 / 2, c_y1 + c_y2 / 2);
         }
 

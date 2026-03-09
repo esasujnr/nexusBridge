@@ -7,7 +7,7 @@ It encapsulates telemetry, status, permissions, and communication state for a si
 
 `CAndruavUnitObject` is the core data model for a connected vehicle or GCS (Ground Control Station) in the Andruav web client. Each instance holds real-time state such as flight mode, GPS, power, video capabilities, and module versions. It acts as a container for subsystem objects like GPS, telemetry, and P2P communication.
 
-Instances are stored in a global list (`AndruavUnitList`) and are identified by a unique `partyID`. The class uses private fields (via `#`) for critical identifiers like `#m_partyID`, `#m_version`, and `#m_isDE` (Drone Engage flag).
+Instances are stored in a global list (`AndruavUnitList`) and are identified by a unique `partyID`. The class uses private fields (via `#`) for critical identifiers like `#m_partyID`, `#m_version`, and `#m_isDE` (Nexus Bridge flag).
 
 ```typescript
 1124:1313:./src/js/js_andruavUnit.js
@@ -21,7 +21,7 @@ export class CAndruavUnitObject {
     this.m_defined = false;
     this.m_IsMe = false;           // true if this is the local GCS
     this.m_IsGCS = true;           // true if unit is a GCS
-    this.#m_isDE = false;          // Drone Engage firmware?
+    this.#m_isDE = false;          // Nexus Bridge firmware?
     this.Description = "";
     this.m_unitName = "unknown";
     this.m_groupName = null;

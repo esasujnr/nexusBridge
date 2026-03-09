@@ -39,7 +39,7 @@ async function main() {
 // -----------------------------------------------------------------------------
 const packageJson = JSON.parse(await fs.readFile(new URL('../package.json', import.meta.url), 'utf8'));
 console.log(`${colors.cyan}=================================================${colors.reset}`);
-console.log(`${colors.bright}${colors.yellow}DroneEngage WebClient Connector ver: ${colors.green}${packageJson.version}${colors.reset}`);
+console.log(`${colors.bright}${colors.yellow}Nexus Bridge WebClient Connector ver: ${colors.green}${packageJson.version}${colors.reset}`);
 console.log(`${colors.cyan}=================================================${colors.reset}`);
 console.log(Usage());
 console.log(`${colors.cyan}=================================================${colors.reset}`);

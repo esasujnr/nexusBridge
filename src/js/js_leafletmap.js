@@ -15,7 +15,7 @@ import {js_globals} from './js_globals.js';
 import {EVENTS as js_event} from './js_eventList.js'
 import {js_eventEmitter} from './js_eventEmitter'
 
-import {fn_contextMenu} from './js_main'
+import {fn_contextMenu, fn_closeContextPopup} from './js_main'
 class CLeafLetAndruavMap {
 
     constructor() {
@@ -24,6 +24,10 @@ class CLeafLetAndruavMap {
         this.m_isMapInit = false;
         this.m_elevator = null;
         this.m_markGuided = null;
+        this.m_zoomLevelControl = null;
+        this.m_zoomLevelLabel = null;
+        this.m_onMapZoomChanged = this.fn_updateZoomLevelIndicator.bind(this);
+        this.m_onMapMoveChanged = this.fn_updateZoomLevelIndicator.bind(this);
 
     };
 
@@ -73,14 +77,19 @@ class CLeafLetAndruavMap {
     */
     fn_initMap(p_mapelement) {
         let v_site_copyright;
-         v_site_copyright = '&copy; <a href="' + (js_siteConfig.CONST_HOME_URL || '#') + '">' + (js_siteConfig.CONST_TITLE || 'Map') + '</a>';
+         v_site_copyright = '&copy; ' + (js_siteConfig.CONST_TITLE || 'Map');
 
 
         this.m_Map = L.map(p_mapelement, {
-            center: [51.505, -0.09],
-            zoom: 13,
+            center: [7.9465, -1.0232], // Ghana
+            zoom: 7,
             doubleClickZoom: false // Disable the default double-click zoom
         });
+
+        // Remove Leaflet's default attribution reference link/prefix.
+        if (this.m_Map.attributionControl) {
+            this.m_Map.attributionControl.setPrefix(false);
+        }
         
         // Validate tile layer URL before using
         const tileUrl = js_siteConfig.CONST_MAP_LEAFLET_URL;
@@ -94,6 +103,8 @@ class CLeafLetAndruavMap {
                 attribution: v_site_copyright,
                 id: 'mapbox.streets'
             }).addTo(this.m_Map);
+
+        this.fn_addZoomLevelIndicator();
         
 
         
@@ -178,6 +189,7 @@ class CLeafLetAndruavMap {
         this.m_Map.on('click', function (event) {
             if (js_globals.CONST_MAP_EDITOR !== true)
 			{
+                fn_closeContextPopup();
                 update_timeout = setTimeout(function () { // if (dontexecute) return ;
                     $('.contextmenu').remove();
                     }, 300);
@@ -195,6 +207,83 @@ class CLeafLetAndruavMap {
 
         this.m_isMapInit = true;
     };
+
+    fn_addZoomLevelIndicator()
+    {
+        if (this.m_Map == null || this.m_zoomLevelControl != null) return;
+
+        const me = this;
+        const zoomControlClass = L.Control.extend({
+            options: {
+                position: 'topleft'
+            },
+            onAdd() {
+                const container = L.DomUtil.create('div', 'leaflet-bar nb-zoom-level-control');
+                const label = L.DomUtil.create('a', 'nb-zoom-level-control__label', container);
+                label.href = '#';
+                label.setAttribute('role', 'button');
+                label.setAttribute('aria-label', 'Current map scale in meters');
+                label.setAttribute('title', 'Current map scale in meters');
+                label.setAttribute('tabindex', '-1');
+
+                L.DomEvent.disableClickPropagation(container);
+                L.DomEvent.disableScrollPropagation(container);
+                L.DomEvent.on(label, 'click', L.DomEvent.stop);
+
+                me.m_zoomLevelLabel = label;
+                me.fn_updateZoomLevelIndicator();
+                return container;
+            }
+        });
+
+        this.m_zoomLevelControl = new zoomControlClass();
+        this.m_Map.addControl(this.m_zoomLevelControl);
+        this.m_Map.on('zoomend', this.m_onMapZoomChanged);
+        this.m_Map.on('moveend', this.m_onMapMoveChanged);
+    }
+
+    fn_updateZoomLevelIndicator()
+    {
+        if (this.m_Map == null || this.m_zoomLevelLabel == null) return;
+        const scaleLinePixelLength = 100; // Match QGC map scale source sampling width.
+        const v_scaleLengthsMeters = [5, 10, 25, 50, 100, 150, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000];
+
+        const mapContainer = this.m_Map.getContainer();
+        const mapRect = mapContainer.getBoundingClientRect();
+        const labelRect = this.m_zoomLevelLabel.getBoundingClientRect();
+        let yPixel = (labelRect.top + (labelRect.height / 2)) - mapRect.top;
+        if (!Number.isFinite(yPixel)) yPixel = 0;
+        yPixel = Math.max(0, Math.min(mapRect.height || 0, yPixel));
+
+        const leftCoord = this.m_Map.containerPointToLatLng([0, yPixel]);
+        const rightCoord = this.m_Map.containerPointToLatLng([scaleLinePixelLength, yPixel]);
+        let scaleLineMeters = Math.round(leftCoord.distanceTo(rightCoord));
+
+        if (!Number.isFinite(scaleLineMeters) || scaleLineMeters <= 0) {
+            this.m_zoomLevelLabel.textContent = '--';
+            return;
+        }
+
+        let selectedMeters = v_scaleLengthsMeters[v_scaleLengthsMeters.length - 1];
+        for (let i = 0; i < v_scaleLengthsMeters.length - 1; i++) {
+            if (scaleLineMeters < ((v_scaleLengthsMeters[i] + v_scaleLengthsMeters[i + 1]) / 2)) {
+                selectedMeters = v_scaleLengthsMeters[i];
+                break;
+            }
+        }
+
+        let dist = Math.round(selectedMeters);
+        if (dist > 1000) {
+            if (dist > 100000) {
+                dist = Math.round(dist / 1000);
+            } else {
+                dist = Math.round(dist / 100) / 10;
+            }
+            this.m_zoomLevelLabel.textContent = `${dist} km`;
+        } else {
+            this.m_zoomLevelLabel.textContent = `${dist} m`;
+        }
+    }
 
     /*
      * Function to add a physical marker on the map and attached events to it.
@@ -602,22 +691,50 @@ class CLeafLetAndruavMap {
          * @param {*} p_lat 
          * @param {*} p_lng 
          */
-    fn_showInfoWindow(p_infoWindow, p_content, p_lat, p_lng) {
+    fn_showInfoWindow(p_infoWindow, p_content, p_lat, p_lng, p_className = null) {
         
         if (this.m_Map == null) return null;
         
         this.fn_hideInfoWindow(p_infoWindow);
 
-        p_infoWindow = L.popup().setLatLng(new L.LatLng(p_lat, p_lng)).setContent(p_content).openOn(this.m_Map);
+        const popupOptions = {};
+        if (typeof p_className === 'string' && p_className.trim().length > 0) {
+            popupOptions.className = p_className.trim();
+        }
+
+        p_infoWindow = L.popup(popupOptions).setLatLng(new L.LatLng(p_lat, p_lng)).setContent(p_content).openOn(this.m_Map);
 
         return p_infoWindow;
     }
 
-    fn_bindPopup (p_infoWindow, p_content, p_lat, p_lng)
+    fn_bindPopup (p_infoWindow, p_content, p_lat, p_lng, p_className = null)
     {
         if (!p_infoWindow) return null;
 
-        p_infoWindow.bindPopup(p_content).openPopup();
+        const bindOptions = {};
+        if (typeof p_className === 'string' && p_className.trim().length > 0) {
+            bindOptions.className = p_className.trim();
+        }
+
+        if (typeof p_infoWindow.setContent === 'function') {
+            p_infoWindow.setContent(p_content);
+            if (this.m_Map && typeof p_infoWindow.openOn === 'function') {
+                p_infoWindow.openOn(this.m_Map);
+            }
+        }
+        else if (typeof p_infoWindow.bindPopup === 'function') {
+            p_infoWindow.bindPopup(p_content, bindOptions).openPopup();
+        }
+
+        if (typeof p_infoWindow.getElement === 'function') {
+            const popupElement = p_infoWindow.getElement();
+            if (popupElement && bindOptions.className) {
+                bindOptions.className
+                    .split(/\s+/)
+                    .filter((cls) => cls && cls.length > 0)
+                    .forEach((cls) => popupElement.classList.add(cls));
+            }
+        }
 
         return p_infoWindow;
     }

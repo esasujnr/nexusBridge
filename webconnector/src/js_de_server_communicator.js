@@ -139,7 +139,7 @@ class CDeServerCommunicator {
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': '*/*',
-                    'User-Agent': 'DroneEngage-WebPlugin/0.1.0',
+                    'User-Agent': 'NexusBridge-WebPlugin/0.1.0',
                 },
                 body: JSON.stringify(c.payload),
             }, c.tag);

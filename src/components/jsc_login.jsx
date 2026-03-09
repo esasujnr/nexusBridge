@@ -15,6 +15,7 @@ const CONST_NOT_CONNECTION_OFFLINE = 0;
 const CONST_NOT_CONNECTION_IN_PROGRESS = 1;
 const CONST_NOT_CONNECTION_ONLINE = 2;
 const CONST_NOT_CONNECTION_OFFLINE_FAILED = 3;
+const CONST_NOT_CONNECTION_RETRYING = 4;
 
 class ClssLoginControl extends React.Component {
   constructor() {
@@ -23,6 +24,7 @@ class ClssLoginControl extends React.Component {
       is_connected: CONST_NOT_CONNECTION_OFFLINE,
       m_update: 0,
       use_plugin: false,
+      status_reason: '',
     };
 
     this.m_flag_mounted = false;
@@ -31,6 +33,7 @@ class ClssLoginControl extends React.Component {
     this.txtAccessCodeRef = React.createRef();
     this.txtUnitIDRef = React.createRef();
     this.btnConnectRef = React.createRef();
+    this.dropdownToggleRef = React.createRef();
     this.txtGroupNameRef = React.createRef();
 
     this.chkUsePluginRef = React.createRef();
@@ -50,24 +53,57 @@ class ClssLoginControl extends React.Component {
 
     if (params.status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
       me.state.is_connected = CONST_NOT_CONNECTION_ONLINE;
+      me.state.status_reason = '';
       me.state.username = me.txtUnitIDRef.current.value;
       js_speak.fn_speak(t('connectedSpeech')); // Translate "Connected"
+      me.fn_hideLoginDropdown();
+      me.setState({ m_update: me.state.m_update + 1 });
+    } else if (params.retrying === true) {
+      me.state.is_connected = CONST_NOT_CONNECTION_RETRYING;
+      const attempt = params.attempt ? ` (${params.attempt}/${params.maxAttempts || ''})` : '';
+      me.state.status_reason = (params.reason || t('title.retrying')) + attempt;
+      me.setState({ m_update: me.state.m_update + 1 });
+    } else if (params.status === js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING) {
+      me.state.is_connected = CONST_NOT_CONNECTION_IN_PROGRESS;
+      me.state.status_reason = params.reason || t('title.connecting');
+      me.setState({ m_update: me.state.m_update + 1 });
+    } else if (params.failed === true) {
+      me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE_FAILED;
+      me.state.status_reason = params.reason || 'Connection failed';
       me.setState({ m_update: me.state.m_update + 1 });
     } else {
       me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE;
+      me.state.status_reason = '';
       me.setState({ m_update: me.state.m_update + 1 });
+    }
+  }
+
+  fn_hideLoginDropdown() {
+    const dropdownToggle = this.dropdownToggleRef.current;
+    if (!dropdownToggle) return;
+
+    dropdownToggle.setAttribute('aria-expanded', 'false');
+    const dropdownRoot = dropdownToggle.closest('.dropdown');
+    if (!dropdownRoot) return;
+
+    dropdownRoot.classList.remove('show');
+    const dropdownMenu = dropdownRoot.querySelector('.dropdown-menu');
+    if (dropdownMenu) {
+      dropdownMenu.classList.remove('show');
     }
   }
 
   fn_onAuthInProgress(me) {
     if (me.m_flag_mounted === false) return;
     me.state.is_connected = CONST_NOT_CONNECTION_IN_PROGRESS;
+    me.state.status_reason = '';
     me.setState({ m_update: me.state.m_update + 1 });
   }
 
-  fn_onAuthBad(me) {
+  fn_onAuthBad(me, p_error) {
     if (me.m_flag_mounted === false) return;
     me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE_FAILED;
+    me.state.status_reason = p_error?.em || p_error?.error || 'Authentication failed';
     me.setState({ m_update: me.state.m_update + 1 });
   }
 
@@ -79,7 +115,7 @@ class ClssLoginControl extends React.Component {
       this.setState({ is_connected: CONST_NOT_CONNECTION_OFFLINE });
     } else {
       // offline
-      this.setState({ m_update: this.state.m_update + 1 });
+      this.setState({ m_update: this.state.m_update + 1, status_reason: '' });
 
       const usePlugin = (this.chkUsePluginRef.current && this.chkUsePluginRef.current.checked === true);
       js_localStorage.fn_setWebConnectorEnabled(usePlugin);
@@ -112,7 +148,8 @@ class ClssLoginControl extends React.Component {
     const tabStatus = getTabStatus();
 
     const lsPluginEnabled = js_localStorage.fn_getWebConnectorEnabled();
-    const usePlugin = (lsPluginEnabled !== null) ? lsPluginEnabled : (js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true);
+    const pluginConfigured = js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true;
+    const usePlugin = pluginConfigured && ((lsPluginEnabled !== null) ? lsPluginEnabled : true);
     this.state.use_plugin = usePlugin;
     if (this.chkUsePluginRef.current) {
       this.chkUsePluginRef.current.checked = usePlugin;
@@ -284,7 +321,8 @@ class ClssLoginControl extends React.Component {
         {
         title = t('title.logout'); // "Logout"
           const lsPluginEnabled = js_localStorage.fn_getWebConnectorEnabled();
-          const usePlugin = (lsPluginEnabled !== null) ? (lsPluginEnabled === true) : (this.state.use_plugin === true);
+          const pluginConfigured = js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true;
+          const usePlugin = pluginConfigured && ((lsPluginEnabled !== null) ? (lsPluginEnabled === true) : (this.state.use_plugin === true));
           css = usePlugin === true ? 'btn-info' : 'btn-danger';
         ctrls2.push(
           <div key={'div_logout' + this.key} className=" ">
@@ -302,9 +340,20 @@ class ClssLoginControl extends React.Component {
         );
         }
         break;
+      case CONST_NOT_CONNECTION_RETRYING:
       case CONST_NOT_CONNECTION_IN_PROGRESS:
-        title = t('title.connecting'); // "Connecting.."
-        css = 'bg-warning';
+        title = this.state.is_connected === CONST_NOT_CONNECTION_RETRYING ? t('title.retrying') : t('title.connecting'); // "Connecting.."
+        css = this.state.is_connected === CONST_NOT_CONNECTION_RETRYING ? 'btn-warning' : 'bg-warning';
+        if (this.state.is_connected === CONST_NOT_CONNECTION_RETRYING) {
+          css += ' text-dark';
+        }
+        if (this.state.status_reason && this.state.status_reason.length > 0) {
+          ctrls.push(
+            <div key={'div_connecting_info' + this.key} className={`small text-warning ${dir}`}>
+              {this.state.status_reason}
+            </div>
+          );
+        }
         ctrls.push(
           <div key={'div_connecting' + this.key} className="">
             <div className={`form-group ${dir} ${this.state.use_plugin === true ? ' hidden' : ''}`}>
@@ -381,11 +430,12 @@ class ClssLoginControl extends React.Component {
     control.push(
       <div key={'ClssLoginControl_complex' + this.key} className="dropdown">
         <button
-          className={'btn btn-secondary dropdown-toggle btn-sm mt-1 ' + css}
+          className={'btn btn-secondary dropdown-toggle btn-sm header-login-toggle ' + css}
           type="button"
           id="dropdownMenuButton1"
           data-bs-toggle="dropdown"
           aria-expanded="false"
+          ref={this.dropdownToggleRef}
         >
           {title}
         </button>
@@ -395,7 +445,7 @@ class ClssLoginControl extends React.Component {
             <button
               id="btnConnect"
               className={'btn button_large rounded-3 m-2 user-select-none ' + css + ' p-0'}
-              title={this.state.username}
+              title={this.state.status_reason || this.state.username || title}
               onClick={(e) => this.clickConnect(e)}
               ref={this.btnConnectRef}
             >

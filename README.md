@@ -1,6 +1,6 @@
-# DroneEngage & Andruav WebClient
+# Nexus Bridge & Andruav WebClient
 
-WebClient is a Ground Control Station (GCS) for [DroneEngage](https://droneengage.com/) and [Andruav](https://www.andruav.com) systems. It provides a browser-based interface for monitoring and controlling drones.
+WebClient is a Ground Control Station (GCS) for [Nexus Bridge](https://droneengage.com/) and [Andruav](https://www.andruav.com) systems. It provides a browser-based interface for monitoring and controlling drones.
 
 [![Ardupilot Cloud EcoSystem](https://cloud.ardupilot.org/_static/ardupilot_logo.png "Ardupilot Cloud EcoSystem")](https://cloud.ardupilot.org "Ardupilot Cloud EcoSystem")
 

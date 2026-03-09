@@ -1,7 +1,7 @@
 import React from 'react';
 
 import * as js_andruavMessages from '../../js/protocol/js_andruavMessages.js';
-import { fn_doStartMissionFrom} from '../../js/js_main.js'
+import { fn_closeContextPopup, fn_doStartMissionFrom } from '../../js/js_main.js'
 
 
 
@@ -38,45 +38,50 @@ export class ClssWaypointStepContextMenu extends React.Component {
 
     render() {
 
+        const lat = this.props.p_lat;
+        const lng = this.props.p_lng;
+        const unit = this.props.p_unit;
+        const waypoint = this.props.p_waypoint;
 
-        let v_style = " css_margin_5px ", v_icon = "";
+        const formatCoord = (value) => (
+            Number.isFinite(value) ? value.toFixed(6) : String(value)
+        );
 
-			
-			const v_footerMenu = (<div key={this.key + 'wp'} className='row'>
-                <div className= 'col-12 flex justify-content-start'><p key={this.key + 'f1'} className='bg-success text-nowrap'>{this.props.p_unit.m_unitName + "   " + this.props.p_unit.m_VehicleType_TXT }</p></div>
-                <div className= 'col-6'><p key={this.key + 'f2'} className='cursor_hand text-primary text-nowrap' onClick={() =>fn_doStartMissionFrom(this.props.p_unit.getPartyID() , this.props.p_waypoint.m_Sequence)}>Start Here</p></div>
-                </div>);
-			
+        const isCircle = waypoint.waypointType === js_andruavMessages.CONST_WayPoint_TYPE_CIRCLE;
+        const seq = waypoint.m_Sequence;
+        const unitType = unit.m_VehicleType_TXT || 'Vehicle';
 
-			let v_contentString = [];
-            //const lat = this.props.p_waypoint.Latitude===undefined?0:this.props.p_waypoint.Latitude.toFixed(6);
-            //const lng = this.props.p_waypoint.Longitude===undefined?0:this.props.p_waypoint.Longitude.toFixed(6);
-            const lat = this.props.p_lat;
-            const lng = this.props.p_lng;
-
-			switch (this.props.p_waypoint.waypointType) {
-				case js_andruavMessages.CONST_WayPoint_TYPE_CIRCLE:
-					v_contentString.push(<p key={this.key + 'c1'} className={'img-rounded bg-primary txt-theme-aware '+  v_style}><strong> {"Circle Seq#" + this.props.p_waypoint.m_Sequence + v_icon}</strong></p>);
-
-                    v_contentString.push(<span key={this.key + 'c2'}  className='help-block'>{this.props.p_waypoint.Latitude + "," + this.props.p_waypoint.Longitude}</span>);
-					v_contentString.push(<p key={this.key + 'c3'} className='text-primary'>{'radius:' + parseInt(this.props.p_waypoint.m_Radius).toFixed(1) + " m x" + parseInt(this.props.p_waypoint.m_Turns).toFixed(0)}</p>);
-					v_contentString.push(v_footerMenu);
-
-					break;
-				default:
-					v_contentString.push(<p key={this.key + 'd1'}  className={'img-rounded bg-primary txt-theme-aware ' + v_style}><strong>{'Waypoint Seq#' + this.props.p_waypoint.m_Sequence + v_icon }</strong></p>);
-                    v_contentString.push(<p key={this.key + 'd2'} className="text-primary margin_zero  " >
-                        lat:<span className='si-09x text-success'>{lat}</span> 
-                    </p>);
-                    v_contentString.push(<p key={this.key + 'd3'} className="text-primary margin_zero  " >
-                        lng:<span className='si-09x text-success'>{lng}</span>
-                    </p>);
-                    v_contentString.push(v_footerMenu);
-					break;
-			}
+        const radius = Number.isFinite(waypoint.m_Radius) ? waypoint.m_Radius.toFixed(1) : Number.parseFloat(waypoint.m_Radius || 0).toFixed(1);
+        const turns = Number.isFinite(waypoint.m_Turns) ? waypoint.m_Turns.toFixed(0) : Number.parseFloat(waypoint.m_Turns || 0).toFixed(0);
 
         return (
-            v_contentString
+            <div className="nb-context-menu nb-waypoint-menu col-12">
+                <div className="nb-context-menu__header">
+                    <p className="nb-context-menu__title">{isCircle ? `Circle Seq#${seq}` : `Waypoint Seq#${seq}`}</p>
+                    <p className="nb-context-menu__coords">Lat {formatCoord(lat)} | Lng {formatCoord(lng)}</p>
+                    {isCircle && (
+                        <p className="nb-waypoint-menu__detail">
+                            Radius {radius} m | Turns {turns}
+                        </p>
+                    )}
+                </div>
+
+                <div className="nb-context-card nb-waypoint-card">
+                    <p className="nb-waypoint-card__unit">
+                        {unit.m_unitName} | {unitType}
+                    </p>
+                    <button
+                        type="button"
+                        className="nb-context-btn nb-context-btn--goto nb-waypoint-btn"
+                        onClick={() => {
+                            fn_closeContextPopup();
+                            fn_doStartMissionFrom(unit.getPartyID(), seq);
+                        }}
+                    >
+                        Start Here
+                    </button>
+                </div>
+            </div>
         );
     }
 
