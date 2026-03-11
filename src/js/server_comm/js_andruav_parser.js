@@ -238,6 +238,21 @@ class CAndruavClientParser {
         //js_andruav_facade.AndruavClientFacade.API_requestIMU (target,true);  // NOT USED
     };
 
+    #prv_promoteTelemetryOnlyUnit(p_unit, senderName) {
+        if (!p_unit) return;
+        if (p_unit.m_defined === true) return;
+
+        p_unit.m_defined = true;
+        // If a unit is sending live telemetry/GPS but ID is delayed, treat it as a vehicle provisionally.
+        p_unit.m_IsGCS = false;
+        if (!p_unit.m_unitName || String(p_unit.m_unitName).trim().length === 0) {
+            p_unit.m_unitName = senderName || p_unit.getPartyID?.() || 'vehicle';
+        }
+
+        this.#prv_onNewUnitAdded(p_unit);
+        js_eventEmitter.fn_dispatch(js_event.EE_andruavUnitAdded, p_unit);
+    }
+
 
     parseCommunicationMessage(Me, msg, evt) {
 
@@ -344,6 +359,7 @@ class CAndruavClientParser {
                 if (typeof p_jmsg === 'string' || p_jmsg instanceof String) { // backword compatible
                     p_jmsg = JSON.parse(msg.msgPayload); // Internal message JSON
                 }
+                this.#prv_promoteTelemetryOnlyUnit(p_unit, msg.senderName);
                 p_unit.m_GPS_Info1.m_isValid = true;
                 p_unit.m_GPS_Info1.GPS3DFix = p_jmsg['3D'];
                 p_unit.m_GPS_Info1.m_satCount = p_jmsg.SC;

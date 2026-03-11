@@ -3,8 +3,10 @@ import React    from 'react';
 
 import { js_globals } from '../../js/js_globals.js';
 import {js_speak} from '../../js/js_speak'
+import { js_andruavAuth } from '../../js/js_andruav_auth.js';
+import ClssSafetyHoldButton from '../common/jsc_safety_hold_button.jsx';
 
-import {fn_do_modal_confirmation, fn_changeAltitude, gui_doYAW} from '../../js/js_main'
+import {fn_auditAction, fn_do_modal_confirmation, fn_changeAltitude, gui_doYAW} from '../../js/js_main'
 import * as js_andruavUnit from '../../js/js_andruavUnit.js';
 
 export class ClssCtrlPx4FlightControl extends React.Component {
@@ -239,6 +241,7 @@ export class ClssCtrlPx4FlightControl extends React.Component {
 	}
 
     fn_ToggleArm(v_andruavUnit) { //bug no need to pass parameter
+        if (this.fn_canArmDisarm(v_andruavUnit) !== true) return;
         if (this.props.v_andruavUnit !== null && this.props.v_andruavUnit !== undefined) {
             if (this.props.v_andruavUnit.m_isArmed) {
                 this.fn_doDisarm(v_andruavUnit);
@@ -250,18 +253,21 @@ export class ClssCtrlPx4FlightControl extends React.Component {
     }
 
     fn_doArm(v_andruavUnit) { //bug no need to pass parameter
+        if (this.fn_canArmDisarm(v_andruavUnit, 'ARM') !== true) return;
         if (this.props.v_andruavUnit !== null && this.props.v_andruavUnit !== undefined) {
             fn_do_modal_confirmation("DANGEROUS: FORCE ADMING  " + this.props.v_andruavUnit.m_unitName + "   " + this.props.v_andruavUnit.m_VehicleType_TXT,
                 "OVERRIDE ARM .. Are You SURE?", function (p_approved) {
                     if (p_approved === false) 
                     {
-                        js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, false);
+                        const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, false);
+                        fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'ARM requested' : 'ARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
                         return;
                     }
                     else
                     {
 					    js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                        js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, true);
+                        const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, true);
+                        fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'FORCED ARM requested' : 'FORCED ARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
                         return ;
                     }
                 }, "FORCED-ARM", "bg-danger txt-theme-aware", "ARM");
@@ -269,67 +275,80 @@ export class ClssCtrlPx4FlightControl extends React.Component {
     }
 
     fn_doDisarm(v_andruavUnit) {
+        if (this.fn_canArmDisarm(v_andruavUnit, 'DISARM') !== true) return;
         if (this.props.v_andruavUnit !== null && this.props.v_andruavUnit !== undefined) {
             fn_do_modal_confirmation("DANGEROUS: EMERGENCY DISARM  " + this.props.v_andruavUnit.m_unitName + "   " + this.props.v_andruavUnit.m_VehicleType_TXT,
                 "STOP all MOTORS and if vehicle in air will CRASH. Are You SURE?", function (p_approved) {
                     if (p_approved === false) return;
 					js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                    js_globals.v_andruavFacade.API_do_Arm(this.props.v_andruavUnit, false, true);
+                    const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, false, true);
+                    fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'DISARM requested' : 'DISARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
                 }, "KILL-MOTORS", "bg-danger txt-theme-aware");
 
 
         }
     }
 
-    fn_doHold(v_andruavUnit) {
+    fn_canArmDisarm(v_andruavUnit, actionLabel = 'ARM/DISARM') {
+        if (js_andruavAuth.fn_canExecuteAction('arm_disarm') === true) return true;
+        const role = js_andruavAuth.fn_getRole();
+        fn_auditAction(
+            'warn',
+            v_andruavUnit?.getPartyID?.() || '',
+            `[${role}] blocked ${actionLabel} for ${v_andruavUnit?.m_unitName || 'unit'}`
+        );
+        return false;
+    }
+
+    fn_doHold() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_AUTO_HOLD);
     }
 
-    fn_doManual(v_andruavUnit) {
+    fn_doManual() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_MANUAL);
     }
 
-    fn_doStabilize(v_andruavUnit) {
+    fn_doStabilize() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_STABILIZE);
     }
 
-    fn_doAcro(v_andruavUnit) {
+    fn_doAcro() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_ACRO);
     }
 
-    fn_doAltCtl(v_andruavUnit) {
+    fn_doAltCtl() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_ALT_HOLD);
     }
 
-    fn_doRAttitude(v_andruavUnit) {
+    fn_doRAttitude() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_RATTITUDE);
     }
 
-    fn_doTakeoff(v_andruavUnit) {
+    fn_doTakeoff() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_AUTO_TAKEOFF);
     }
 
-    fn_doLand(v_andruavUnit) {
+    fn_doLand() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_AUTO_LAND);
     }
 
-    fn_doMission(v_andruavUnit) {
+    fn_doMission() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_AUTO_MISSION);
     }
 
-    fn_doRTL(v_andruavUnit) {
+    fn_doRTL() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_AUTO_RTL);
     }
 
-    fn_doPosCtl(v_andruavUnit) {
+    fn_doPosCtl() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_POSCTL_POSCTL);
     }
 
-    fn_doPosOrbit(v_andruavUnit) {
+    fn_doPosOrbit() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_POSCTL_ORBIT);
     }
 
-    fn_doVtolTakeOff(v_andruavUnit) {
+    fn_doVtolTakeOff() {
         js_globals.v_andruavFacade.API_do_FlightMode(this.props.v_andruavUnit, js_andruavUnit.CONST_FLIGHT_PX4_VTOL_TAKEOFF);
     }
 
@@ -343,6 +362,11 @@ export class ClssCtrlPx4FlightControl extends React.Component {
     {
         let btn = this.hlp_getflightButtonStyles(this.props.v_andruavUnit);
         const armButtonLabel = this.props.v_andruavUnit.m_isArmed === true ? 'Disarm' : 'Arm';
+        const canArmDisarm = js_andruavAuth.fn_canExecuteAction('arm_disarm') === true;
+        const role = js_andruavAuth.fn_getRole();
+        const armTitle = canArmDisarm === true
+            ? `Hold to ${armButtonLabel.toLowerCase()} ${this.props.v_andruavUnit.m_unitName}`
+            : `Role ${role} cannot ${armButtonLabel.toLowerCase()} ${this.props.v_andruavUnit.m_unitName}`;
         let ctrl=[];
         
 
@@ -350,10 +374,18 @@ export class ClssCtrlPx4FlightControl extends React.Component {
         {
             default:
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
-                    <button id='btn_arm' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_arm_class}  title='ARM / DISARM' onClick={ () => this.fn_ToggleArm(this.props.v_andruavUnit)}>&nbsp;{armButtonLabel}&nbsp;</button>
+                    <ClssSafetyHoldButton
+                        id='btn_arm'
+                        className={'btn btn-sm flgtctrlbtn ' + btn.btn_arm_class}
+                        title={armTitle}
+                        disabled={canArmDisarm !== true}
+                        onConfirm={() => this.fn_ToggleArm(this.props.v_andruavUnit)}
+                    >
+                        &nbsp;{armButtonLabel}&nbsp;
+                    </ClssSafetyHoldButton>
                     <button id='btn_auto_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_takeoff_class}  onClick={ () => this.fn_doTakeoff(this.props.v_andruavUnit)}>&nbsp;Takeoff&nbsp;</button>
                     <button id='btn_auto_vtol_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_vtol_takeoff_class}  title='VTOL-Takeoff' onClick={ () => this.fn_doVtolTakeOff(this.props.v_andruavUnit)}>&nbsp;V-TkOff&nbsp;</button>
-                    <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn '  + btn.btn_climb_class } onClick={ (e) => fn_changeAltitude(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
+                    <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn '  + btn.btn_climb_class } onClick={ () => fn_changeAltitude(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
                     <button id='btn_manual' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_manual_ctl_class}  title='ARM / DISARM' onClick={ () => this.fn_doManual(this.props.v_andruavUnit)}>&nbsp;Manual&nbsp;</button>
                     <button id='btn_acro_ctl' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_acro_ctl_class}  onClick={ () => this.fn_doAcro(this.props.v_andruavUnit)}>&nbsp;ACRO&nbsp;</button>
                     <button id='btn_stabilize' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_stabilize_class}   onClick={ () => this.fn_doStabilize(this.props.v_andruavUnit)}>&nbsp;Stabilize&nbsp;</button>
@@ -363,13 +395,13 @@ export class ClssCtrlPx4FlightControl extends React.Component {
         
                 ctrl.push(<div key={this.props.id+"rc2"}   id={this.props.id+"rc2"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
                     <button id='btn_auto_land' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_land_class}   onClick={ () => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
-                    <button id='btn_auto_hold' type='button' className={'btn btn-sm  flgtctrlbtn '  + btn.btn_auto_hold_class } onClick={ (e) => this.fn_doHold(this.props.v_andruavUnit)}>&nbsp;Hold&nbsp;</button>
-                    <button id='btn_auto_mission' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_mission_class } onClick={ (e) => this.fn_doMission(this.props.v_andruavUnit)}>&nbsp;Mission&nbsp;</button>
+                    <button id='btn_auto_hold' type='button' className={'btn btn-sm  flgtctrlbtn '  + btn.btn_auto_hold_class } onClick={ () => this.fn_doHold(this.props.v_andruavUnit)}>&nbsp;Hold&nbsp;</button>
+                    <button id='btn_auto_mission' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_mission_class } onClick={ () => this.fn_doMission(this.props.v_andruavUnit)}>&nbsp;Mission&nbsp;</button>
                     <button id='btn_auto_rtl' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_rtl_class}   onClick={ () => this.fn_doRTL(this.props.v_andruavUnit)}>&nbsp;RTL&nbsp;</button>
                     <button id='btn_auto_vtol_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_auto_vtol_takeoff_class}  title='VTOL-Takeoff' onClick={ () => this.fn_doVtolTakeOff(this.props.v_andruavUnit)}>&nbsp;V-TkOff&nbsp;</button>
                     <button id='btn_pos_ctl' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_pos_ctl_class}  title='Position Control' onClick={ () => this.fn_doPosCtl(this.props.v_andruavUnit)}>&nbsp;Pos-Ctl&nbsp;</button>
                     <button id='btn_pos_orbit' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_pos_orbit_class}  title='APosition Orbit' onClick={ () => this.fn_doPosOrbit(this.props.v_andruavUnit)}>&nbsp;Orbit&nbsp;</button>
-                    <button id='btn_yaw' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_yaw_class } onClick={ (e) => gui_doYAW(this.props.v_andruavUnit.getPartyID())}>&nbsp;YAW&nbsp;</button>
+                    <button id='btn_yaw' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_yaw_class } onClick={ () => gui_doYAW(this.props.v_andruavUnit.getPartyID())}>&nbsp;YAW&nbsp;</button>
                     </div></div>);
                 break;
         }

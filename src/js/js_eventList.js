@@ -40,6 +40,7 @@ const EVENT_LIST = Object.freeze({
 			"EE_unitNavUpdated",
 			"EE_onSocketStatus",
 			"EE_onSocketStatus2",
+			"EE_opsHealthUpdated",
 			"EE_onGUIMessage",
 			"EE_onGUIMessageHide",
 			"EE_updateLogin",
@@ -114,7 +115,12 @@ const EVENT_LIST = Object.freeze({
 			"EE_onWebRTC_Video_Statistics",
 
 			"EE_Language_Changed",
-			"EE_Opacity_Control"
+			"EE_Opacity_Control",
+			"EE_uiFocusChanged",
+			"EE_uiMissionLayerChanged",
+			"EE_uiAlertEvent",
+			"EE_uiLayoutPresetApplied",
+			"EE_missionIntegrityUpdated"
 		].reduce((acc, name, index) => {
 			acc[name] = `EVT_${index + 1}`;
 			return acc;

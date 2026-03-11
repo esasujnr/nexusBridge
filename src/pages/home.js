@@ -8,11 +8,13 @@ import '../css/css_gamepad.css';
 import 'jquery-ui-dist/jquery-ui.min.js';
 import 'jquery-knob/dist/jquery.knob.min.js';
 
-import React, { useEffect, useState } from 'react';
-import { useTranslation , withTranslation} from 'react-i18next';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 
 import { js_globals } from '../js/js_globals.js';
+import { EVENTS as js_event } from '../js/js_eventList.js';
+import { js_eventEmitter } from '../js/js_eventEmitter.js';
 import ClssHeaderControl from '../components/jsc_header';
 import ClssGlobalSettings from '../components/jsc_globalSettings';
 import ClssAndruavUnitList from '../components/unit_controls/jsc_unitControlMainList.jsx';
@@ -26,13 +28,158 @@ import ClssServoControl from '../components/dialogs/jsc_servoDialogControl.jsx';
 import ClssAndruavUnitListArray from '../components/unit_controls/jsc_unitControlArrayView.jsx';
 import ClssUnitParametersList from '../components/dialogs/jsc_unitParametersList.jsx';
 import ClssConfigGenerator from '../components/jsc_config_generator.jsx'
+import ClssOpsHealthPanel from '../components/gadgets/jsc_ops_health_panel.jsx';
+import ClssOpsUIToolsPanel from '../components/gadgets/jsc_ops_ui_tools_panel.jsx';
 import { ClssCVideoControl } from '../components/video/jsc_videoDisplayComponent.jsx';
-import { fn_on_ready, fn_showMap, fn_showVideoMainTab } from '../js/js_main';
+import { fn_gotoUnit_byPartyID, fn_on_ready, fn_showMap, fn_showVideoMainTab } from '../js/js_main';
+import { js_leafletmap } from '../js/js_leafletmap.js';
 
 const Home = () => {
   const { t } = useTranslation('home'); // Use home namespace
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isVideoView, setIsVideoView] = useState(false);
+  const [layoutPreset, setLayoutPreset] = useState(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return 'balanced';
+    try {
+      const raw = window.localStorage.getItem('nb-layout-preset');
+      if (raw === 'map_focus' || raw === 'controls_focus' || raw === 'balanced') return raw;
+    } catch {
+      return 'balanced';
+    }
+    return 'balanced';
+  });
+
+  const mapColumnClass = layoutPreset === 'map_focus'
+    ? 'col-lg-9 col-xl-9 col-xxl-9 col-12'
+    : (layoutPreset === 'controls_focus'
+      ? 'col-lg-7 col-xl-7 col-xxl-7 col-12'
+      : 'col-lg-8 col-xl-8 col-xxl-8 col-12');
+
+  const rightColumnClass = layoutPreset === 'map_focus'
+    ? 'col-lg-3 col-xl-3 col-xxl-3 col-12'
+    : (layoutPreset === 'controls_focus'
+      ? 'col-lg-5 col-xl-5 col-xxl-5 col-12'
+      : 'col-lg-4 col-xl-4 col-xxl-4 col-12');
+
+  const onCenterAllVehicles = useCallback(() => {
+    const map = js_leafletmap?.m_Map;
+    if (!map || typeof map.fitBounds !== 'function') return;
+
+    const isEligibleUnit = (unit) => (
+      unit
+      && unit.m_defined === true
+      && unit.m_IsGCS !== true
+      && unit.m_IsDisconnectedFromGCS !== true
+      && unit.m_IsShutdown !== true
+    );
+
+    const units = js_globals?.m_andruavUnitList?.fn_getUnitValues?.() || [];
+    const points = [];
+    units.forEach((unit) => {
+      if (!isEligibleUnit(unit)) return;
+      const lat = Number(unit?.m_Nav_Info?.p_Location?.lat);
+      const lng = Number(unit?.m_Nav_Info?.p_Location?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      points.push([lat, lng]);
+    });
+
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.panTo(points[0], { animate: true });
+      return;
+    }
+
+    map.fitBounds(points, {
+      padding: [44, 44],
+      maxZoom: 18,
+      animate: true
+    });
+  }, []);
+
+  const onFocusActiveVehicle = useCallback(() => {
+    const isEligibleUnit = (unit) => (
+      unit
+      && unit.m_defined === true
+      && unit.m_IsGCS !== true
+      && unit.m_IsDisconnectedFromGCS !== true
+      && unit.m_IsShutdown !== true
+      && typeof unit.getPartyID === 'function'
+    );
+
+    const units = js_globals?.m_andruavUnitList?.fn_getUnitsSorted?.() || [];
+    const activePartyID = js_globals?.v_ui_active_party_id;
+    const activeUnit = activePartyID
+      ? js_globals?.m_andruavUnitList?.fn_getUnit?.(activePartyID)
+      : null;
+    const fallbackUnit = units.find((unit) => isEligibleUnit(unit));
+    const targetUnit = isEligibleUnit(activeUnit) ? activeUnit : fallbackUnit;
+    if (!targetUnit) return;
+
+    fn_gotoUnit_byPartyID(targetUnit.getPartyID());
+
+    const map = js_leafletmap?.m_Map;
+    if (!map || typeof map.getContainer !== 'function' || typeof map.containerPointToLatLng !== 'function') return;
+
+    const scaleStepsMeters = [5, 10, 25, 50, 100, 150, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000];
+    const sampleWidthPx = 100;
+
+    const getSnappedScale = (rawMeters) => {
+      if (!Number.isFinite(rawMeters) || rawMeters <= 0) return NaN;
+      for (let i = 0; i < scaleStepsMeters.length - 1; i += 1) {
+        if (rawMeters < ((scaleStepsMeters[i] + scaleStepsMeters[i + 1]) / 2)) {
+          return scaleStepsMeters[i];
+        }
+      }
+      return scaleStepsMeters[scaleStepsMeters.length - 1];
+    };
+
+    const measureSnappedScaleAtCurrentZoom = () => {
+      const mapContainer = map.getContainer();
+      if (!mapContainer) return NaN;
+      const mapRect = mapContainer.getBoundingClientRect();
+      const yPixel = Math.max(0, Math.min(mapRect.height || 0, Math.round((mapRect.height || 0) / 2)));
+      const leftCoord = map.containerPointToLatLng([0, yPixel]);
+      const rightCoord = map.containerPointToLatLng([sampleWidthPx, yPixel]);
+      return getSnappedScale(Math.round(leftCoord.distanceTo(rightCoord)));
+    };
+
+    const enforceMinimumScaleMeters = () => {
+      const maxZoom = Number.isFinite(map.getMaxZoom?.()) ? map.getMaxZoom() : 22;
+      const startZoom = map.getZoom();
+      const startScale = measureSnappedScaleAtCurrentZoom();
+      if (!Number.isFinite(startScale) || startScale <= 100) return;
+
+      let bestZoom = startZoom;
+      let bestScale = startScale;
+      let bestDelta = Math.abs(startScale - 100);
+
+      for (let zoom = startZoom + 1; zoom <= maxZoom; zoom += 1) {
+        map.setZoom(zoom, { animate: false });
+        const snapped = measureSnappedScaleAtCurrentZoom();
+        if (!Number.isFinite(snapped)) continue;
+
+        const delta = Math.abs(snapped - 100);
+        if (delta < bestDelta || (delta === bestDelta && snapped === 100)) {
+          bestZoom = zoom;
+          bestScale = snapped;
+          bestDelta = delta;
+        }
+        if (snapped === 100) break;
+      }
+
+      if (map.getZoom() !== bestZoom) {
+        map.setZoom(bestZoom, { animate: false });
+      }
+      if (bestScale !== 100 && map.getZoom() === startZoom) {
+        map.setZoom(bestZoom, { animate: false });
+      }
+    };
+
+    if (typeof map.once === 'function') {
+      map.once('moveend', enforceMinimumScaleMeters);
+    }
+    window.setTimeout(enforceMinimumScaleMeters, 350);
+  }, []);
 
   useEffect(() => {
     js_globals.CONST_MAP_EDITOR = false;
@@ -51,12 +198,30 @@ const Home = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const listener = { id: 'home-layout-preset' };
+    const onLayoutPresetApplied = (me, payload) => {
+      const nextPreset = payload?.preset;
+      if (nextPreset !== 'balanced' && nextPreset !== 'map_focus' && nextPreset !== 'controls_focus') return;
+      setLayoutPreset(nextPreset);
+      try {
+        window.localStorage.setItem('nb-layout-preset', nextPreset);
+      } catch {
+        return;
+      }
+    };
+    js_eventEmitter.fn_subscribe(js_event.EE_uiLayoutPresetApplied, listener, onLayoutPresetApplied);
+    return () => {
+      js_eventEmitter.fn_unsubscribe(js_event.EE_uiLayoutPresetApplied, listener);
+    };
+  }, []);
+
   return (
     <div>
       <ClssHeaderControl />
 
-      <div id="mainBody" className="row css_mainbody">
-        <div id="row_1" className="col-lg-8 col-xl-8 col-xxl-8 col-12">
+      <div id="mainBody" className={`row css_mainbody nb-layout-${layoutPreset}`}>
+        <div id="row_1" className={mapColumnClass}>
           <div id="row_1_1" className="row margin_zero">
             <div id="displays" className="container-fluid text-center">
               <div className="monitorview" id="message_notification" style={{ display: 'none' }}>
@@ -65,6 +230,26 @@ const Home = () => {
               <div id="div_cmp_hud"></div>
               <div className="monitorview" id="div_map_view">
                 <div id="mapid" className="org_border fullscreen"></div>
+                <div className="nb-map-quick-tools" role="toolbar" aria-label="Map quick tools">
+                  <button
+                    type="button"
+                    className="btn btn-sm nb-map-quick-tools__btn"
+                    title="Center map on all available vehicles"
+                    aria-label="Center map on all available vehicles"
+                    onClick={onCenterAllVehicles}
+                  >
+                    <span className="bi bi-house-fill" aria-hidden="true"></span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm nb-map-quick-tools__btn"
+                    title="Focus active vehicle"
+                    aria-label="Focus active vehicle"
+                    onClick={onFocusActiveVehicle}
+                  >
+                    <span className="bi bi-bullseye" aria-hidden="true"></span>
+                  </button>
+                </div>
               </div>
               <div className="cameraview" id="div_video_control">
                 <ClssCVideoControl />
@@ -128,8 +313,8 @@ const Home = () => {
           <ClssStreamDialog />
         </div>
 
-        <div id="row_2" className="col-lg-4 col-xl-4 col-xxl-4 col-12">
-          <div id="andruavUnits" className="col-sm-12 padding_zero">
+        <div id="row_2" className={rightColumnClass}>
+          <div id="andruavUnits" className="col-sm-12 padding_zero nb-right-panel">
             <div className="settings-panel-toolbar">
               <button
                 type="button"
@@ -163,12 +348,14 @@ const Home = () => {
                 )}
               </button>
             </div>
+            <ClssOpsHealthPanel />
+            <ClssOpsUIToolsPanel />
             <div id="andruavUnits_in" className="settings-panel-body" style={{ display: isSettingsOpen ? 'block' : 'none' }}>
               <ClssGlobalSettings />
               <div id="andruavUnitGlobals"></div>
-              <p className="bg-primary txt-theme-aware text-center css_margin_top_small rounded_6px mb-2">
+              <div className="nb-right-panel-section-title">
                 <strong>{t('home:onlineUnits')}</strong>
-              </p>
+              </div>
             </div>
             <div id="guiMessageCtrl" className="row"></div>
             <div id="andruavUnitList" className="row">
@@ -330,4 +517,4 @@ const Home = () => {
   );
 };
 
-export default withTranslation('home')(Home);
+export default Home;

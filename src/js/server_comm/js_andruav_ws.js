@@ -154,10 +154,11 @@ class CAndruavClientWS {
 
 
             const msgx_txt = this.fn_generateJSONMessage(this.partyID, p_target, v_rountingMsg, msgType, msg);
-            this.sendex(msgx_txt, false);
+            return this.sendex(msgx_txt, false);
 
         } catch (e) {
             // js_common.fn_console_log("Exception API_sendCMD", e); // Disable in production for perf
+            return false;
         }
     };
 
@@ -173,7 +174,7 @@ class CAndruavClientWS {
         const h = js_helpers.fn_str2ByteArray(this.fn_generateJSONMessage(this.partyID, targetName, v_msgRouting, msgType));
 
         const msgx_bin = js_helpers.fn_concatBuffers(h, data, true);
-        this.sendex(msgx_bin, true);
+        return this.sendex(msgx_bin, true);
     };
 
 
@@ -202,17 +203,19 @@ class CAndruavClientWS {
     };
 
     _API_sendSYSCMD(p_msgID, p_msg) {
-        this.sendex(this.fn_generateJSONMessage(this.partyID, null, CMDTYPE_SYS, p_msgID, p_msg));
+        return this.sendex(this.fn_generateJSONMessage(this.partyID, null, CMDTYPE_SYS, p_msgID, p_msg));
     };
 
 
     sendex(msg, is_binary) {
         try {
             if (this.ws) {
-                this.ws.sendex(msg, is_binary);
+                return this.ws.sendex(msg, is_binary);
             }
+            return false;
         } catch (e) {
             // js_common.fn_console_log("Exception API_sendCMD", e); // Disable in production for perf
+            return false;
         }
     }
 
@@ -453,8 +456,10 @@ class CAndruavClientWS {
                         else {
                             this.send(msg); // Send ArrayBuffer directly (fn_concatBuffers should return ArrayBuffer)
                         }
+                        return true;
                     } else {
                         console.error("WebSocket is not yet open, cannot send message.");
+                        return false;
                     }
                 };
                 // OnOpen callback of Websocket

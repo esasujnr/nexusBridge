@@ -10,7 +10,8 @@ import { mavlink20 } from '../../js/js_mavlink_v2.js';
 
 import {
     fn_requestWayPoints,
-    fn_clearWayPointsFromMap
+    fn_clearWayPointsFromMap,
+    fn_auditAction
 } from '../../js/js_main.js'
 
 import * as js_andruavMessages from '../../js/protocol/js_andruavMessages'
@@ -54,6 +55,7 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
             tab_details: this.props.tab_details,
             tab_module: this.props.tab_module,
             tab_collapsed: this.props.tab_collapsed,
+            ui_sections: this.fn_getSavedSections(),
 
             m_update: 0
         };
@@ -64,6 +66,82 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
 
         js_eventEmitter.fn_subscribe (js_event.EE_OldModule,this,this.fn_update);
         
+    }
+
+    fn_getSavedSections() {
+        const defaults = {
+            hud: true,
+            controls: true
+        };
+
+        if (typeof window === 'undefined' || !window.localStorage) {
+            return defaults;
+        }
+
+        try {
+            const key = `nb-ui-sections:${this.props.p_unit?.getPartyID?.() || 'default'}`;
+            const raw = window.localStorage.getItem(key);
+            if (!raw) return defaults;
+            const parsed = JSON.parse(raw);
+            return {
+                hud: parsed?.hud !== false,
+                controls: parsed?.controls !== false
+            };
+        } catch {
+            return defaults;
+        }
+    }
+
+    fn_saveSections(nextSections) {
+        if (typeof window === 'undefined' || !window.localStorage) return;
+        try {
+            const key = `nb-ui-sections:${this.props.p_unit?.getPartyID?.() || 'default'}`;
+            window.localStorage.setItem(key, JSON.stringify(nextSections));
+        } catch {
+            return;
+        }
+    }
+
+    fn_toggleSection(sectionKey) {
+        const currentSections = this.state.ui_sections || {};
+        const nextSections = {
+            ...currentSections,
+            [sectionKey]: currentSections[sectionKey] !== false ? false : true
+        };
+        this.fn_saveSections(nextSections);
+        this.setState({ ui_sections: nextSections });
+    }
+
+    fn_renderSection(title, iconClass, sectionKey, content) {
+        const isOpen = (this.state.ui_sections || {})[sectionKey] !== false;
+        return (
+            <section className="nb-unit-section" key={`${this.props.p_unit.getPartyID()}_${sectionKey}`}>
+                <button
+                    type="button"
+                    className="nb-unit-section__toggle"
+                    onClick={() => this.fn_toggleSection(sectionKey)}
+                    aria-expanded={isOpen}
+                >
+                    <span className="nb-unit-section__title">
+                        <i className={iconClass} aria-hidden="true"></i>
+                        <span>{title}</span>
+                    </span>
+                    <i className={`bi bi-chevron-down nb-unit-section__chevron ${isOpen ? '' : 'is-collapsed'}`} aria-hidden="true"></i>
+                </button>
+                <div className={`nb-unit-section__body ${isOpen ? '' : 'hidden'}`}>
+                    {content}
+                </div>
+            </section>
+        );
+    }
+
+    renderMainSections(v_andruavUnit) {
+        return (
+            <div className="nb-unit-sections">
+                {this.fn_renderSection('Vehicle HUD', 'bi bi-speedometer2', 'hud', <ClssCtrlDroneIMU p_unit={v_andruavUnit} />)}
+                {this.fn_renderSection('Flight Actions', 'bi bi-sliders2', 'controls', this.renderControl(v_andruavUnit))}
+            </div>
+        );
     }
 
     componentDidMount() {
@@ -101,6 +179,41 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
         else {
             js_globals.v_andruavFacade.API_engageRX(p_andruavUnit);
         }
+    }
+
+    fn_hasPermission(action, p_andruavUnit, label) {
+        if (js_andruavAuth.fn_canExecuteAction(action) === true) return true;
+        const role = js_andruavAuth.fn_getRole();
+        fn_auditAction(
+            'warn',
+            p_andruavUnit?.getPartyID?.() || '',
+            `[${role}] blocked ${label} for ${p_andruavUnit?.m_unitName || 'unit'}`
+        );
+        return false;
+    }
+
+    fn_requestWayPointsWithAudit(p_andruavUnit) {
+        if (this.fn_hasPermission('mission_read', p_andruavUnit, 'R-WP') !== true) return;
+        fn_requestWayPoints(p_andruavUnit, true);
+        fn_auditAction('info', p_andruavUnit?.getPartyID?.() || '', `R-WP requested for ${p_andruavUnit?.m_unitName || 'unit'}`);
+    }
+
+    fn_clearWayPointsFromMapWithAudit(p_andruavUnit) {
+        if (this.fn_hasPermission('mission_write', p_andruavUnit, 'C-WP') !== true) return;
+        fn_clearWayPointsFromMap(p_andruavUnit);
+        fn_auditAction('warn', p_andruavUnit?.getPartyID?.() || '', `C-WP cleared map mission for ${p_andruavUnit?.m_unitName || 'unit'}`);
+    }
+
+    fn_webRXToggleWithAudit(p_andruavUnit) {
+        if (this.fn_hasPermission('critical_action', p_andruavUnit, 'RX toggle') !== true) return;
+        this.fn_webRX_toggle(p_andruavUnit);
+        fn_auditAction('warn', p_andruavUnit?.getPartyID?.() || '', `RX toggled for ${p_andruavUnit?.m_unitName || 'unit'}`);
+    }
+
+    fn_releaseTXCtrlWithAudit(p_andruavUnit) {
+        if (this.fn_hasPermission('critical_action', p_andruavUnit, 'TX release') !== true) return;
+        this.fn_releaseTXCtrl(p_andruavUnit);
+        fn_auditAction('warn', p_andruavUnit?.getPartyID?.() || '', `TX-Rel executed for ${p_andruavUnit?.m_unitName || 'unit'}`);
     }
 
 
@@ -305,8 +418,7 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
             }
 
             container_controls.push(<div key={v_andruavUnit.getPartyID() + 'myTabContent_1'} className={css} id={"main" + v_andruavUnit.getPartyID()}>
-                <ClssCtrlDroneIMU p_unit={v_andruavUnit} />
-                {this.renderControl(v_andruavUnit)}
+                {this.renderMainSections(v_andruavUnit)}
             </div>);
         }
         if (this.state.tab_log === true) {
@@ -406,6 +518,10 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
         let ctrl2_2 = [];
         let cls_ctrl_modes = '  ';
         let cls_ctrl_wp = '  ';
+        const canMissionRead = js_andruavAuth.fn_canExecuteAction('mission_read') === true;
+        const canMissionWrite = js_andruavAuth.fn_canExecuteAction('mission_write') === true;
+        const canCriticalAction = js_andruavAuth.fn_canExecuteAction('critical_action') === true;
+        const role = js_andruavAuth.fn_getRole();
         if (!js_andruavAuth.fn_do_canControlWP()) {   // no permission
             cls_ctrl_wp = ' hidden disabled ';
         }
@@ -427,13 +543,45 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
 
 
         ctrl2_1.push(<div key={p_andruavUnit.getPartyID() + "rc3"} id='rc33' className='col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
-            <button id='btn_refreshwp' key={this.key + 'btn_refreshwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + btn.btn_load_wp_class} onClick={(e) => fn_requestWayPoints(p_andruavUnit, true)} title="Read Mission from Drone">&nbsp;R-WP</button>
-            <button id='btn_clearwp' key={this.key + 'btn_clearwp'} type='button' className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_clear_wp_class} onClick={(e) => fn_clearWayPointsFromMap(p_andruavUnit)} title="Clear Waypoints from Map" >&nbsp;C-WP</button>
-            <button id='btn_webRX' key={this.key + 'btn_webRX'} type='button' className={'btn btn-sm flgtctrlbtn ' + btn.btn_rx_class} onClick={(e) => this.fn_webRX_toggle(p_andruavUnit)} title={`${btn.btn_rx_text}--${btn.btn_rx_title}`}>&nbsp;RX</button>
+            <button
+                id='btn_refreshwp'
+                key={this.key + 'btn_refreshwp'}
+                type='button'
+                className={'btn btn-sm flgtctrlbtn ' + btn.btn_load_wp_class}
+                onClick={() => this.fn_requestWayPointsWithAudit(p_andruavUnit)}
+                title={canMissionRead === true ? `Read mission from ${p_andruavUnit.m_unitName}` : `Role ${role} cannot read mission`}
+                disabled={canMissionRead !== true}
+            >&nbsp;R-WP</button>
+            <button
+                id='btn_clearwp'
+                key={this.key + 'btn_clearwp'}
+                type='button'
+                className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_clear_wp_class}
+                onClick={() => this.fn_clearWayPointsFromMapWithAudit(p_andruavUnit)}
+                title={canMissionWrite === true ? `Clear map mission of ${p_andruavUnit.m_unitName}` : `Role ${role} cannot clear mission`}
+                disabled={canMissionWrite !== true}
+            >&nbsp;C-WP</button>
+            <button
+                id='btn_webRX'
+                key={this.key + 'btn_webRX'}
+                type='button'
+                className={'btn btn-sm flgtctrlbtn ' + btn.btn_rx_class}
+                onClick={() => this.fn_webRXToggleWithAudit(p_andruavUnit)}
+                title={canCriticalAction === true ? `${btn.btn_rx_text}--${btn.btn_rx_title}` : `Role ${role} cannot toggle RX`}
+                disabled={canCriticalAction !== true}
+            >&nbsp;RX</button>
             <button id='btn_freezerx' key={this.key + 'btn_freezerx'} type='button' title="Freeze RemoteControl -DANGER-" className={'hidden btn btn-sm flgtctrlbtn ' + btn.btn_takeCTRL_class + cls_ctrl_modes} onClick={(e) => this.fn_takeTXCtrl(e, p_andruavUnit)}>&nbsp;TX-Frz&nbsp;</button>
-            <button id='btn_releaserx' key={this.key + 'btn_releaserx'} type='button' title="Release Control" className={'btn btn-sm flgtctrlbtn ' + btn.btn_releaseCTRL_class + cls_ctrl_modes} onClick={(e) => this.fn_releaseTXCtrl(p_andruavUnit)}>&nbsp;TX-Rel&nbsp;</button>
-            <button id='btn_inject_param' key={this.key + 'btn_inject_param'} type='button' title="Send Parameters to GCS" className={'btn btn-sm flgtctrlbtn ' + btn.btn_sendParameters_class} onClick={(e) => this.fn_displayParamsDialog(p_andruavUnit)}>&nbsp;PARM&nbsp;</button>
-            <button id='btn_lidar_info' key={this.key + 'btn_lidar_info'} type='button' title="Display Lidar Info" className={'btn btn-sm flgtctrlbtn ' + btn.btn_lidar_info_class} onClick={(e) => this.fn_displayLidarDialog(p_andruavUnit)}>&nbsp;LIDAR</button>
+            <button
+                id='btn_releaserx'
+                key={this.key + 'btn_releaserx'}
+                type='button'
+                title={canCriticalAction === true ? "Release Control" : `Role ${role} cannot release TX`}
+                className={'btn btn-sm flgtctrlbtn ' + btn.btn_releaseCTRL_class + cls_ctrl_modes}
+                onClick={() => this.fn_releaseTXCtrlWithAudit(p_andruavUnit)}
+                disabled={canCriticalAction !== true}
+            >&nbsp;TX-Rel&nbsp;</button>
+            <button id='btn_inject_param' key={this.key + 'btn_inject_param'} type='button' title="Send Parameters to GCS" className={'btn btn-sm flgtctrlbtn ' + btn.btn_sendParameters_class} onClick={() => this.fn_displayParamsDialog(p_andruavUnit)}>&nbsp;PARM&nbsp;</button>
+            <button id='btn_lidar_info' key={this.key + 'btn_lidar_info'} type='button' title="Display Lidar Info" className={'btn btn-sm flgtctrlbtn ' + btn.btn_lidar_info_class} onClick={() => this.fn_displayLidarDialog(p_andruavUnit)}>&nbsp;LIDAR</button>
         </div></div>);
 
         ctrl2_2.push(<div key={p_andruavUnit.getPartyID() + "rc3_1"} id='rc33' className='col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>

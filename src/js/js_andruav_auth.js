@@ -4,6 +4,7 @@ import * as js_andruavMessages from './protocol/js_andruavMessages.js';
 import { js_eventEmitter } from './js_eventEmitter';
 import { js_localStorage } from './js_localStorage.js';
 import { js_globals } from './js_globals.js';
+import { fn_opsHealthHandleAuthDiag } from './js_ops_health.js';
 import {
     fn_buildAuthUrl,
     fn_buildAuthUrlEx,
@@ -18,7 +19,7 @@ import {
 const AUTH_REQUEST_TIMEOUT = 10000; // Timeout for requests (ms)
 const AUTH_GCS_TYPE = 'g';
 const AUTH_ERROR_BAD_CONNECTION = 'Cannot Login .. Bad Connection or Timeout';
-const DEFAULT_PERMISSIONS = '0xffffffff'; // Default permission as string (hex)
+const DEFAULT_PERMISSIONS = 0xffffffff; // Default permission mask
 const ERROR_CODES = {
     INVALID_INPUT: -1,
     INVALID_PERMISSION: -2,
@@ -30,6 +31,7 @@ const ERROR_CODES = {
 
 const fn_auth_diag = (stage, data = {}) => {
     try {
+        fn_opsHealthHandleAuthDiag(stage, data);
         console.info('[DIAG][AUTH]', {
             traceId: js_globals.v_connectTraceId || 'na',
             stage: stage,
@@ -180,6 +182,60 @@ class CAndruavAuth {
      */
     fn_do_canVideo() {
         return (this._m_perm & js_andruavMessages.CONST_ALLOW_GCS_VIDEO) === js_andruavMessages.CONST_ALLOW_GCS_VIDEO;
+    }
+
+    fn_getPermissionMask() {
+        const raw = this._m_perm;
+        if (Number.isFinite(raw)) return raw >>> 0;
+        if (typeof raw === 'string') {
+            const text = raw.trim().toLowerCase();
+            if (text.startsWith('0x')) {
+                const parsedHex = Number.parseInt(text, 16);
+                if (Number.isFinite(parsedHex)) return parsedHex >>> 0;
+            }
+            const parsedNum = Number(text);
+            if (Number.isFinite(parsedNum)) return parsedNum >>> 0;
+        }
+        return 0;
+    }
+
+    fn_getRole() {
+        if (this.fn_do_canGCS() !== true) return 'observer';
+        if (this.fn_do_canControl() !== true) return 'observer';
+
+        const mask = this.fn_getPermissionMask();
+        const hasFullModes = this.fn_do_canControlModes() === true;
+        const hasFullWp = this.fn_do_canControlWP() === true;
+        const hasVideo = this.fn_do_canVideo() === true;
+        if (mask === 0xffffffff || (hasFullModes && hasFullWp && hasVideo)) {
+            return 'admin';
+        }
+        return 'operator';
+    }
+
+    fn_canExecuteAction(action) {
+        const key = String(action || '').trim().toLowerCase();
+        switch (key) {
+            case 'fly_to_here':
+            case 'set_home':
+            case 'arm_disarm':
+            case 'flight_mode':
+            case 'mission_write':
+            case 'critical_action':
+                return this.fn_do_canControl() === true;
+
+            case 'mission_read':
+            case 'view_telemetry':
+            case 'view_video':
+                return this.fn_do_canGCS() === true;
+
+            case 'manage_users':
+            case 'admin_config':
+                return this.fn_getRole() === 'admin';
+
+            default:
+                return this.fn_do_canControl() === true;
+        }
     }
 
     /**
@@ -438,6 +494,10 @@ class CAndruavAuth {
                     e: parsed.error,
                     em: parsed.errorMessage,
                 });
+                fn_auth_diag('login_rejected', {
+                    code: parsed.error ?? ERROR_CODES.UNKNOWN_ERROR,
+                    message: parsed.errorMessage || 'Plugin login failed',
+                });
                 if (js_siteConfig.CONST_WEBCONNECTOR_AUTO_FALLBACK !== true) {
                     js_eventEmitter.fn_dispatch(js_event.EE_Auth_BAD_Logined, {
                         e: parsed.error ?? ERROR_CODES.UNKNOWN_ERROR,
@@ -471,11 +531,19 @@ class CAndruavAuth {
                 port: this.m_server_port,
                 isPluginTarget: String(this.m_server_port) === String(pluginWsPort),
             });
+            fn_auth_diag('login_success', {
+                serverHost: this.m_server_ip,
+                serverPort: this.m_server_port,
+            });
             js_eventEmitter.fn_dispatch(js_event.EE_Auth_Logined, parsed.raw);
             return true;
         } catch (error) {
             this._m_logined = false;
             console.error('[WebConnector] login exception', error);
+            fn_auth_diag('login_exception', {
+                isSslError: false,
+                message: error.message || 'Unknown error',
+            });
             if (js_siteConfig.CONST_WEBCONNECTOR_AUTO_FALLBACK !== true) {
                 js_eventEmitter.fn_dispatch(js_event.EE_Auth_BAD_Logined, {
                     e: ERROR_CODES.NETWORK_ERROR,

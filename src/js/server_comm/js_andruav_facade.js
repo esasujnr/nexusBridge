@@ -30,6 +30,12 @@ import { CCommandAPI } from '../protocol/js_commands_api.js'
 
 import * as js_andruav_ws from './js_andruav_ws.js';
 import * as js_andruav_parser from './js_andruav_parser.js'
+import {
+    fn_commandFeedbackTrackArm,
+    fn_commandFeedbackTrackDispatch,
+    fn_commandFeedbackTrackFlightMode,
+    fn_commandFeedbackTrackSetHome
+} from '../js_command_feedback.js';
 
 
 import { mavlink20 } from '../js_mavlink_v2.js'
@@ -343,12 +349,27 @@ class CAndruavClientFacade {
 
     // Very Danger to expose [emergencyDisarm]
     API_do_Arm(p_andruavUnit, param_toArm, param_emergencyDisarm) {
-        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return;
+        if (!p_andruavUnit || p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return false;
         let msg = {
             A: param_toArm,
             D: param_emergencyDisarm
         };
-        js_andruav_ws.AndruavClientWS.API_sendCMD(p_andruavUnit.getPartyID(), js_andruavMessages.CONST_TYPE_AndruavMessage_Arm, msg);
+        const sent = js_andruav_ws.AndruavClientWS.API_sendCMD(
+            p_andruavUnit.getPartyID(),
+            js_andruavMessages.CONST_TYPE_AndruavMessage_Arm,
+            msg
+        );
+        fn_commandFeedbackTrackArm(
+            p_andruavUnit,
+            param_toArm === true,
+            sent === true,
+            {
+                label: (param_toArm === true)
+                    ? (param_emergencyDisarm === true ? 'FORCED ARM' : 'ARM')
+                    : (param_emergencyDisarm === true ? 'EMERGENCY DISARM' : 'DISARM')
+            }
+        );
+        return sent === true;
     }
 
 
@@ -382,11 +403,30 @@ class CAndruavClientFacade {
 
     API_do_SetHomeLocation(p_partyID, p_latitude, p_longitude, p_altitude) {
 
-        if (p_partyID === null || p_partyID === undefined) return;
+        if (p_partyID === null || p_partyID === undefined) return false;
 
         const cmd = CCommandAPI.API_do_SetHomeLocation(null, p_latitude, p_longitude, p_altitude);
 
-        js_andruav_ws.AndruavClientWS.API_sendCMD(p_partyID, cmd.mt, cmd.ms);
+        const sent = js_andruav_ws.AndruavClientWS.API_sendCMD(p_partyID, cmd.mt, cmd.ms);
+        const unit = js_globals?.m_andruavUnitList?.fn_getUnit?.(p_partyID) || null;
+        const unitName = unit?.m_unitName || p_partyID;
+        fn_commandFeedbackTrackSetHome(
+            p_partyID,
+            unitName,
+            p_latitude,
+            p_longitude,
+            sent === true,
+            unit,
+            { label: 'Set Home' }
+        );
+
+        if (sent === true && unit) {
+            setTimeout(() => {
+                this.API_do_GetHomeLocation(unit);
+            }, 900);
+        }
+
+        return sent === true;
     }
 
     API_do_GetHomeLocation(p_andruavUnit) {
@@ -426,17 +466,40 @@ class CAndruavClientFacade {
     }
 
     API_do_Land(p_andruavUnit) {
-        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return;
+        if (!p_andruavUnit || p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return false;
         let v_msg = {};
-        js_andruav_ws.AndruavClientWS.API_sendCMD(p_andruavUnit.getPartyID(), js_andruavMessages.CONST_TYPE_AndruavMessage_Land, v_msg);
+        const sent = js_andruav_ws.AndruavClientWS.API_sendCMD(
+            p_andruavUnit.getPartyID(),
+            js_andruavMessages.CONST_TYPE_AndruavMessage_Land,
+            v_msg
+        );
+        fn_commandFeedbackTrackFlightMode(
+            p_andruavUnit,
+            js_andruavUnit.CONST_FLIGHT_CONTROL_LAND,
+            sent === true,
+            { label: 'Land' }
+        );
+        return sent === true;
     }
 
     //TODO: change p_partyID to p_andruavUnit
     API_do_FlightMode(p_andruavUnit, flightMode) {
+        if (!p_andruavUnit || p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return false;
         let v_msg = {
             F: flightMode
         };
-        js_andruav_ws.AndruavClientWS.API_sendCMD(p_andruavUnit.getPartyID(), js_andruavMessages.CONST_TYPE_AndruavMessage_FlightControl, v_msg);
+        const sent = js_andruav_ws.AndruavClientWS.API_sendCMD(
+            p_andruavUnit.getPartyID(),
+            js_andruavMessages.CONST_TYPE_AndruavMessage_FlightControl,
+            v_msg
+        );
+        fn_commandFeedbackTrackFlightMode(
+            p_andruavUnit,
+            flightMode,
+            sent === true,
+            { label: `Mode ${flightMode}` }
+        );
+        return sent === true;
     }
 
 
@@ -506,7 +569,11 @@ class CAndruavClientFacade {
 
         const msg = CCommandAPI.API_do_FlyHere(p_latitude, p_longitude, p_altitude, p_xVel, p_yVel, p_zVel);
 
-        js_andruav_ws.AndruavClientWS.API_sendCMD(p_partyID, msg.mt, msg.ms);
+        const sent = js_andruav_ws.AndruavClientWS.API_sendCMD(p_partyID, msg.mt, msg.ms);
+        const unit = js_globals?.m_andruavUnitList?.fn_getUnit?.(p_partyID) || null;
+        const unitName = unit?.m_unitName || p_partyID || 'unit';
+        fn_commandFeedbackTrackDispatch(p_partyID, unitName, 'Fly To Here', sent === true);
+        return sent === true;
     }
 
 

@@ -5,6 +5,8 @@ import { EVENTS as js_event } from '../../js/js_eventList.js';
 import { js_eventEmitter } from '../../js/js_eventEmitter';
 import { js_andruavAuth } from '../../js/js_andruav_auth';
 import { fn_recoverTelemetry } from '../../js/js_main';
+import { fn_opsHealthSnapshot } from '../../js/js_ops_health.js';
+import { fn_missionIntegritySnapshot } from '../../js/js_mission_integrity.js';
 
 class ClssCtrlUDPPoxyTelemetry extends React.Component {
   constructor(props) {
@@ -13,12 +15,16 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     this.state = {
       m_message: [],
       m_update: 0,
+      m_opsSnapshot: fn_opsHealthSnapshot(),
+      m_missionSnapshot: fn_missionIntegritySnapshot(),
     };
 
     this.m_flag_mounted = false;
 
     js_eventEmitter.fn_subscribe(js_event.EE_onProxyInfoUpdated, this, this.fn_onProxyInfoUpdated);
     js_eventEmitter.fn_subscribe(js_event.EE_Language_Changed, this, this.fn_updateLanguage);
+    js_eventEmitter.fn_subscribe(js_event.EE_opsHealthUpdated, this, this.fn_onOpsHealthUpdated);
+    js_eventEmitter.fn_subscribe(js_event.EE_missionIntegrityUpdated, this, this.fn_onMissionIntegrityUpdated);
   }
 
   shouldComponentUpdate(nextProps, nextState) {
@@ -29,6 +35,8 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
   componentWillUnmount() {
     js_eventEmitter.fn_unsubscribe(js_event.EE_Language_Changed, this);
     js_eventEmitter.fn_unsubscribe(js_event.EE_onProxyInfoUpdated, this);
+    js_eventEmitter.fn_unsubscribe(js_event.EE_opsHealthUpdated, this);
+    js_eventEmitter.fn_unsubscribe(js_event.EE_missionIntegrityUpdated, this);
   }
 
   componentDidMount() {
@@ -74,6 +82,22 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
   }
 
+  fn_onOpsHealthUpdated(p_me, snapshot) {
+    if (p_me.m_flag_mounted === false) return;
+    p_me.setState({
+      m_opsSnapshot: snapshot || fn_opsHealthSnapshot(),
+      m_update: p_me.state.m_update + 1,
+    });
+  }
+
+  fn_onMissionIntegrityUpdated(p_me, snapshot) {
+    if (p_me.m_flag_mounted === false) return;
+    p_me.setState({
+      m_missionSnapshot: snapshot || fn_missionIntegritySnapshot(),
+      m_update: p_me.state.m_update + 1,
+    });
+  }
+
   fn_recoverTelemetry(p_andruavUnit) {
     if (p_andruavUnit == null) return;
     fn_recoverTelemetry(p_andruavUnit, {
@@ -84,15 +108,107 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     });
   }
 
+  fn_getHealthClass(state) {
+    switch (state) {
+      case 'connected':
+      case 'ok':
+      case 'active':
+      case 'streaming':
+      case 'paused':
+        return 'ops-unit-state is-ok';
+
+      case 'connecting':
+      case 'retrying':
+      case 'recovering':
+      case 'degraded':
+        return 'ops-unit-state is-warn';
+
+      case 'failed':
+      case 'error':
+      case 'inactive':
+      case 'disconnected':
+        return 'ops-unit-state is-bad';
+
+      default:
+        return 'ops-unit-state is-idle';
+    }
+  }
+
+  renderUnitHealth(v_andruavUnit, canControl) {
+    const partyID = v_andruavUnit.getPartyID ? v_andruavUnit.getPartyID() : '';
+    const snapshot = this.state.m_opsSnapshot || fn_opsHealthSnapshot();
+    const unitState = (snapshot && snapshot.units) ? snapshot.units[partyID] : null;
+    const wsState = unitState?.ws?.state || snapshot?.global?.ws?.state || 'disconnected';
+    const wsRetryCount = unitState?.ws?.attempt || snapshot?.global?.ws?.attempt || 0;
+    const wsRetryMax = unitState?.ws?.maxAttempts || snapshot?.global?.ws?.maxAttempts || 0;
+    const udpState = unitState?.udp?.state || 'inactive';
+    const udpNote = unitState?.udp?.statusNote || '';
+    const videoState = unitState?.video?.state || 'idle';
+    const udpRetryCount = unitState?.udp?.retryCount || 0;
+    const udpRetryMax = unitState?.udp?.retryMax || 0;
+    const missionSnapshot = this.state.m_missionSnapshot || fn_missionIntegritySnapshot();
+    const missionState = missionSnapshot?.units?.[partyID] || null;
+    const droneChecksum = missionState?.droneChecksum || 'unknown';
+    const mapChecksum = missionState?.mapChecksum || 'unknown';
+    const shortDroneChecksum = String(droneChecksum).slice(0, 8);
+    const shortMapChecksum = String(mapChecksum).slice(0, 8);
+    const missionStale = missionState?.stale === true || missionState?.pendingRead === true;
+
+    return (
+      <div className="ops-unit-health" dir={this.props.i18n.language === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">WS</span>
+          <span className={this.fn_getHealthClass(wsState)}>{wsState}</span>
+        </div>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">UDP</span>
+          <span className={this.fn_getHealthClass(udpState)}>{udpState}</span>
+        </div>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">WS Retry</span>
+          <span className="ops-unit-state is-idle">{wsRetryCount}/{wsRetryMax || '?'}</span>
+        </div>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">Video</span>
+          <span className={this.fn_getHealthClass(videoState)}>{videoState}</span>
+        </div>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">UDP Retry</span>
+          <span className="ops-unit-state is-idle">{udpRetryCount}/{udpRetryMax || '?'}</span>
+        </div>
+        <div className="ops-unit-health-row">
+          <span className="ops-unit-label">Mission</span>
+          <span className={this.fn_getHealthClass(missionStale ? 'degraded' : 'active')}>
+            D{missionState?.droneVersion || 0}/M{missionState?.mapVersion || 0}
+          </span>
+        </div>
+        <div className={`ops-unit-note ${missionStale ? 'is-stale' : ''}`}>
+          chk d:{shortDroneChecksum} | m:{shortMapChecksum}
+          {missionStale ? ` | stale:${missionState?.staleReason || 'pending_read'}` : ''}
+        </div>
+        {udpNote && (
+          <div className="ops-unit-note">{udpNote}</div>
+        )}
+        <button
+          type="button"
+          className="btn btn-sm ops-unit-btn"
+          title={canControl ? 'Force UDP recovery' : 'Read-only: no control permission'}
+          disabled={canControl !== true}
+          onClick={() => this.fn_recoverTelemetry(v_andruavUnit)}
+        >
+          UDP Refresh
+        </button>
+      </div>
+    );
+  }
+
   renderUdpProxy() {
     const { t } = this.props;
-    if (!js_andruavAuth.fn_do_canControl()) {
-      return <div></div>;
-    }
+    const canControl = js_andruavAuth.fn_do_canControl() === true;
 
     let v_udpproxy_text_ip = '';
     let v_udpproxy_text_port = '';
-    let v_telemetry_lvl_class = 'text-warning';
+    let v_telemetry_lvl_class = canControl ? 'text-warning' : 'txt-theme-aware';
     const v_andruavUnit = this.props.p_unit;
     let v_udp_data = [];
     let v_udp_on_off = [];
@@ -103,46 +219,50 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
 
       if (v_andruavUnit.m_Telemetry.m_udpProxy_paused === false) {
         v_telemetry_lvl_class = 'text-warning';
-        v_udp_on_off.push(
-          <span
-            key={v_andruavUnit.getPartyID() + 'pause'}
-            title={t('udpProxyTelemetry:pauseTitle')}
-            onClick={(e) => this.fn_pauseTelemetry(v_andruavUnit)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              fill="currentColor"
-              className="bi bi-power"
-              viewBox="0 0 16 16"
+        if (canControl) {
+          v_udp_on_off.push(
+            <span
+              key={v_andruavUnit.getPartyID() + 'pause'}
+              title={t('udpProxyTelemetry:pauseTitle')}
+              onClick={(e) => this.fn_pauseTelemetry(v_andruavUnit)}
             >
-              <path d="M7.5 1v7h1V1h-1z" />
-              <path d="M3 8.812a4.999 4.999 0 0 1 2.578-4.375l-.485-.874A6 6 0 1 0 11 3.616l-.501.865A5 5 0 1 1 3 8.812z" />
-            </svg>
-          </span>
-        );
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                fill="currentColor"
+                className="bi bi-power"
+                viewBox="0 0 16 16"
+              >
+                <path d="M7.5 1v7h1V1h-1z" />
+                <path d="M3 8.812a4.999 4.999 0 0 1 2.578-4.375l-.485-.874A6 6 0 1 0 11 3.616l-.501.865A5 5 0 1 1 3 8.812z" />
+              </svg>
+            </span>
+          );
+        }
       } else {
         v_telemetry_lvl_class = 'txt-theme-aware';
-        v_udp_on_off.push(
-          <span
-            key={v_andruavUnit.getPartyID() + 'active'}
-            title={t('udpProxyTelemetry:activateTitle')}
-            onClick={(e) => this.fn_startTelemetry(v_andruavUnit)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              fill="currentColor"
-              className="bi bi-power txt-theme-aware"
-              viewBox="0 0 16 16"
+        if (canControl) {
+          v_udp_on_off.push(
+            <span
+              key={v_andruavUnit.getPartyID() + 'active'}
+              title={t('udpProxyTelemetry:activateTitle')}
+              onClick={(e) => this.fn_startTelemetry(v_andruavUnit)}
             >
-              <path d="M7.5 1v7h1V1h-1z" />
-              <path d="M3 8.812a4.999 4.999 0 0 1 2.578-4.375l-.485-.874A6 6 0 1 0 11 3.616l-.501.865A5 5 0 1 1 3 8.812z" />
-            </svg>
-          </span>
-        );
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                fill="currentColor"
+                className="bi bi-power txt-theme-aware"
+                viewBox="0 0 16 16"
+              >
+                <path d="M7.5 1v7h1V1h-1z" />
+                <path d="M3 8.812a4.999 4.999 0 0 1 2.578-4.375l-.485-.874A6 6 0 1 0 11 3.616l-.501.865A5 5 0 1 1 3 8.812z" />
+              </svg>
+            </span>
+          );
+        }
       }
 
       v_udp_data.push(
@@ -168,14 +288,6 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
       v_udp_data.push(
         <div key={v_andruavUnit.getPartyID() + 'refresh'} className="col-12 padding_zero css_user_select_text">
           <div className="css_margin_zero user-select-none">
-            <p
-              id="udp_get"
-              className="bg-warning cursor_hand rounded-3 textunit_w135 text-center user-select-none txt-theme-aware"
-              title={t('udpProxyTelemetry:refreshTitle')}
-              onClick={(e) => this.fn_recoverTelemetry(v_andruavUnit)}
-            >
-              {t('udpProxyTelemetry:udpRefresh')}
-            </p>
             {isRecovering && (
               <p className="si-07x css_margin_zero text-info">
                 {t('udpProxyTelemetry:recovering')}
@@ -193,57 +305,64 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
 
     const rows = (
       <div className="row padding_zero css_user_select_text" dir={this.props.i18n.language === 'ar' ? 'rtl' : 'ltr'}>
-        <div className={v_telemetry_lvl_class + ' row al_l css_margin_zero'}>
+        {canControl && (
+          <div className={v_telemetry_lvl_class + ' row al_l css_margin_zero'}>
+            <div className="col-12 margin_2px padding_zero css_user_select_text">
+              <p className="rounded-3 cursor_hand textunit_w135 mb-0" title={t('udpProxyTelemetry:smartTelemetry')}>
+                <span
+                  title={t('udpProxyTelemetry:decreaseTitle')}
+                  onClick={(e) => this.fn_changeTelemetryOptimizationLevel(v_andruavUnit, -1)}
+                >
+                  <svg
+                    className="bi bi-caret-down-fill"
+                    width="1em"
+                    height="1em"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z" />
+                  </svg>
+                </span>
+                <span
+                  id="telemetry_rate"
+                  className="user-select-none"
+                  onClick={(e) => this.fn_requestUdpProxyStatus(v_andruavUnit)}
+                >
+                  <small>
+                    <b>
+                      &nbsp;
+                      {t('udpProxyTelemetry:levelLabel', { level: this.telemetry_level[v_andruavUnit.m_Telemetry.m_telemetry_level] })}
+                      &nbsp;
+                    </b>
+                  </small>
+                </span>
+                <span
+                  title={t('udpProxyTelemetry:increaseTitle')}
+                  onClick={(e) => this.fn_changeTelemetryOptimizationLevel(v_andruavUnit, +1)}
+                >
+                  <svg
+                    className="bi bi-caret-up-fill"
+                    width="1em"
+                    height="1em"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path d="M3.204 11L8 5.519 12.796 11H3.204zm-.753-.659l4.796-5.48a1 1 0 0 1 1.506 0l4.796 5.48c.566.647.106 1.659-.753 1.659H3.204a1 1 0 0 1-.753-1.659z" />
+                  </svg>
+                </span>
+                {v_udp_on_off}
+              </p>
+            </div>
+          </div>
+        )}
+        <div className="row al_l css_margin_zero css_user_select_text">{v_udp_data}</div>
+        <div className="row al_l css_margin_zero css_user_select_text">
           <div className="col-12 margin_2px padding_zero css_user_select_text">
-            <p className="rounded-3 cursor_hand textunit_w135 mb-0" title={t('udpProxyTelemetry:smartTelemetry')}>
-              <span
-                title={t('udpProxyTelemetry:decreaseTitle')}
-                onClick={(e) => this.fn_changeTelemetryOptimizationLevel(v_andruavUnit, -1)}
-              >
-                <svg
-                  className="bi bi-caret-down-fill"
-                  width="1em"
-                  height="1em"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path d="M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z" />
-                </svg>
-              </span>
-              <span
-                id="telemetry_rate"
-                className="user-select-none"
-                onClick={(e) => this.fn_requestUdpProxyStatus(v_andruavUnit)}
-              >
-                <small>
-                  <b>
-                    &nbsp;
-                    {t('udpProxyTelemetry:levelLabel', { level: this.telemetry_level[v_andruavUnit.m_Telemetry.m_telemetry_level] })}
-                    &nbsp;
-                  </b>
-                </small>
-              </span>
-              <span
-                title={t('udpProxyTelemetry:increaseTitle')}
-                onClick={(e) => this.fn_changeTelemetryOptimizationLevel(v_andruavUnit, +1)}
-              >
-                <svg
-                  className="bi bi-caret-up-fill"
-                  width="1em"
-                  height="1em"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  xmlns="http://www.w3.org/2000/svg"
-                >
-                  <path d="M3.204 11L8 5.519 12.796 11H3.204zm-.753-.659l4.796-5.48a1 1 0 0 1 1.506 0l4.796 5.48c.566.647.106 1.659-.753 1.659H3.204a1 1 0 0 1-.753-1.659z" />
-                </svg>
-              </span>
-              {v_udp_on_off}
-            </p>
+            {this.renderUnitHealth(v_andruavUnit, canControl)}
           </div>
         </div>
-        <div className="row al_l css_margin_zero css_user_select_text">{v_udp_data}</div>
       </div>
     );
 

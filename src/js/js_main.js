@@ -30,6 +30,38 @@ import { js_webrtcstream } from './js_webrtcthin2.js'
 import { js_adsbUnit } from './js_adsbUnit.js'
 import { mavlink20 } from './js_mavlink_v2.js'
 import { fn_getUnitColorKey, fn_getUnitColorPalette } from './js_unit_colors.js'
+import {
+	fn_opsHealthReset,
+	fn_opsHealthSyncFromUnits,
+	fn_opsHealthHandleSocketStatus,
+	fn_opsHealthHandleTelemetryRecovery,
+	fn_opsHealthHandleProxyInfo,
+	fn_opsHealthHandleVideoState,
+	fn_opsHealthAddEvent
+} from './js_ops_health.js';
+import {
+	fn_applyUIFocusRendering,
+	fn_applyUIFocusForUnit,
+	fn_applyMissionLayerStylesAll,
+	fn_applyMissionLayerStyleForUnit,
+	fn_setUIActiveUnit,
+	fn_uiStateReset
+} from './js_ui_state.js';
+import {
+	fn_uiAlertsAdd,
+	fn_uiAlertsReset
+} from './js_ui_alerts.js';
+import {
+	fn_missionIntegrityReset,
+	fn_missionIntegrityMarkReadRequested,
+	fn_missionIntegrityMarkDroneMutationExpected,
+	fn_missionIntegrityMarkMapCleared,
+	fn_missionIntegrityUpdateFromDroneMission
+} from './js_mission_integrity.js';
+import {
+	fn_commandFeedbackInit,
+	fn_commandFeedbackReset
+} from './js_command_feedback.js';
 
 import { ClssMainContextMenu } from '../components/popups/jsc_main_context_menu.jsx'
 import { ClssWaypointStepContextMenu } from '../components/popups/jsc_waypoint_step_content_menu.jsx'
@@ -82,11 +114,14 @@ const WS_RECONNECT_BASE_DELAY_MS = 1500;
 const UDP_RECOVERY_MAX_ATTEMPTS = 2;
 const UDP_RECOVERY_POLL_MS = 1200;
 const UDP_RECOVERY_COOLDOWN_MS = 8000;
+const GPS_MARKER_UPDATE_MIN_MS = 120;
 let v_wsReconnectTimer = null;
 let v_wsReconnectAttempts = 0;
+let v_wsReconnectCancelled = false;
 let v_lastSocketStatusEvent = null;
 const v_udpRecoveryJobs = {};
 const v_udpRecoveryCooldown = {};
+const v_gpsRenderJobs = {};
 
 function fn_diag(subsystem, stage, data = {}) {
 	try {
@@ -1023,22 +1058,57 @@ export function fn_doSetHome(p_partyID, p_latitude, p_longitude, p_altitude) {
 
 	let p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
 	if (p_andruavUnit !== null && p_andruavUnit !== undefined) {
+		if (js_andruavAuth.fn_canExecuteAction('set_home') !== true) {
+			const role = js_andruavAuth.fn_getRole();
+			const deniedMsg = `[${role}] blocked Set Home for ${p_andruavUnit.m_unitName}`;
+			fn_auditAction('warn', p_partyID, deniedMsg);
+			fn_uiAlertsAdd({ source: 'audit', level: 'warn', partyID: p_partyID, message: deniedMsg });
+			return;
+		}
 		fn_do_modal_confirmation("Set Home Location for  " + p_andruavUnit.m_unitName + "   " + p_andruavUnit.m_VehicleType_TXT,
 			"Changing Home Location changes RTL destination. Are you Sure?", function (p_approved) {
 				if (p_approved === false) return;
 				js_speak.fn_speak('home sent');
-				js_globals.v_andruavFacade.API_do_SetHomeLocation(p_partyID, p_latitude, p_longitude, p_altitude);
+				const sent = js_globals.v_andruavFacade.API_do_SetHomeLocation(p_partyID, p_latitude, p_longitude, p_altitude);
+				if (sent === true) {
+					fn_auditAction('info', p_partyID, `Set Home requested for ${p_andruavUnit.m_unitName}`);
+				} else {
+					fn_auditAction('warn', p_partyID, `Set Home send failed for ${p_andruavUnit.m_unitName}`);
+				}
 
 			}, "YES");
 	}
+}
+
+export function fn_auditAction(level, partyID, message) {
+	const entry = {
+		source: 'audit',
+		level: (level === 'error' || level === 'warn') ? level : 'info',
+		partyID: partyID || '',
+		message: String(message || '').trim()
+	};
+	if (!entry.message) return;
+	fn_opsHealthAddEvent(entry);
 }
 
 export function fn_doFlyHere(p_partyID, p_latitude, p_longitude, altitude) {
 	fn_closeContextPopup();
 	let p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
 	if (p_andruavUnit !== null && p_andruavUnit !== undefined) {
+		if (js_andruavAuth.fn_canExecuteAction('fly_to_here') !== true) {
+			const role = js_andruavAuth.fn_getRole();
+			const deniedMsg = `[${role}] blocked Fly To Here for ${p_andruavUnit.m_unitName}`;
+			fn_auditAction('warn', p_partyID, deniedMsg);
+			fn_uiAlertsAdd({ source: 'audit', level: 'warn', partyID: p_partyID, message: deniedMsg });
+			return;
+		}
 		js_speak.fn_speak('point recieved');
-		js_globals.v_andruavFacade.API_do_FlyHere(p_partyID, p_latitude, p_longitude, altitude);
+		const sent = js_globals.v_andruavFacade.API_do_FlyHere(p_partyID, p_latitude, p_longitude, altitude);
+		if (sent === true) {
+			fn_auditAction('warn', p_partyID, `Fly To Here requested for ${p_andruavUnit.m_unitName}`);
+		} else {
+			fn_auditAction('warn', p_partyID, `Fly To Here send failed for ${p_andruavUnit.m_unitName}`);
+		}
 	}
 }
 
@@ -1059,6 +1129,7 @@ export function fn_gotoUnit_byPartyID(p_partyID) {
 	const p_andruavUnit = js_globals.m_andruavUnitList.fn_getUnit(p_partyID);
 	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
 
+	fn_setUIActiveUnit(p_andruavUnit.getPartyID());
 	fn_gotoUnit(p_andruavUnit);
 
 	js_globals.v_andruavFacade.API_do_GetHomeLocation(p_andruavUnit);
@@ -1808,22 +1879,125 @@ function fn_clearWsReconnectTimer() {
 	}
 }
 
-function fn_dispatchRetryStatus(retrying, failed, reason, attempt = 0) {
-	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, {
+function fn_clearGpsRenderJobs() {
+	Object.keys(v_gpsRenderJobs).forEach((partyID) => {
+		const job = v_gpsRenderJobs[partyID];
+		if (job && job.timer) {
+			clearTimeout(job.timer);
+		}
+		delete v_gpsRenderJobs[partyID];
+	});
+}
+
+function fn_scheduleGpsMarkerRender(p_andruavUnit) {
+	if (!p_andruavUnit || typeof p_andruavUnit.getPartyID !== 'function') return;
+	if (!p_andruavUnit.m_gui || !p_andruavUnit.m_gui.m_marker) return;
+	const partyID = p_andruavUnit.getPartyID();
+	if (!partyID) return;
+
+	const doRender = () => {
+		const now = Date.now();
+		const entry = v_gpsRenderJobs[partyID] || {};
+		entry.lastAt = now;
+		entry.timer = null;
+		v_gpsRenderJobs[partyID] = entry;
+
+		fn_refreshVehicleMarkerIcon(p_andruavUnit, false);
+		js_leafletmap.fn_showItem(p_andruavUnit.m_gui.m_marker);
+		js_leafletmap.fn_setPosition_bylatlng(
+			p_andruavUnit.m_gui.m_marker,
+			p_andruavUnit.m_Nav_Info.p_Location.lat,
+			p_andruavUnit.m_Nav_Info.p_Location.lng,
+			p_andruavUnit.m_Nav_Info.p_Orientation.yaw
+		);
+		fn_tryAutoCenterOnFirstConnectedVehicle(p_andruavUnit);
+		fn_applyUIFocusForUnit(p_andruavUnit);
+		js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
+	};
+
+	const entry = v_gpsRenderJobs[partyID] || { lastAt: 0, timer: null };
+	v_gpsRenderJobs[partyID] = entry;
+
+	const elapsed = Date.now() - (entry.lastAt || 0);
+	if (elapsed >= GPS_MARKER_UPDATE_MIN_MS && entry.timer === null) {
+		doRender();
+		return;
+	}
+
+	if (entry.timer !== null) return;
+	const waitMs = Math.max(20, GPS_MARKER_UPDATE_MIN_MS - elapsed);
+	entry.timer = setTimeout(() => {
+		doRender();
+	}, waitMs);
+}
+
+function fn_dispatchRetryStatus(retrying, failed, reason, attempt = 0, reasonCode = '') {
+	const statusPayload = {
 		status: retrying ? js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING : js_andruavMessages.CONST_SOCKET_STATUS_ERROR,
 		name: retrying ? 'Connecting' : 'Error',
 		retrying: retrying === true,
 		failed: failed === true,
 		reason: reason || '',
+		reasonCode: reasonCode || '',
 		attempt: attempt,
 		maxAttempts: WS_RECONNECT_MAX_ATTEMPTS
-	});
+	};
+	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, statusPayload);
+	fn_opsHealthHandleSocketStatus(statusPayload);
 }
 
-function fn_setTelemetryRecoveryState(p_andruavUnit, state, note) {
+function fn_socketReasonCodeFromEvent(event, status) {
+	if (!event || typeof event !== 'object') {
+		if (status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) return 'registered';
+		return '';
+	}
+	if (event.reasonCode) return String(event.reasonCode);
+
+	const closeCode = Number.isFinite(event.closeCode) ? event.closeCode : null;
+	if (closeCode !== null) {
+		switch (closeCode) {
+			case 1000:
+				return 'closed_normal';
+			case 1001:
+				return 'closed_going_away';
+			case 1002:
+				return 'closed_protocol_error';
+			case 1003:
+				return 'closed_unsupported_data';
+			case 1006:
+				return 'closed_abnormal';
+			case 1008:
+				return 'closed_policy_violation';
+			case 1011:
+				return 'closed_server_error';
+			case 1013:
+				return 'closed_try_again_later';
+			default:
+				return `closed_${closeCode}`;
+		}
+	}
+
+	const errorKind = String(event.errorKind || '').trim();
+	if (errorKind) return errorKind;
+	if (status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) return 'registered';
+	if (status === js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING && event.retrying === true) return 'retrying';
+	if (status === js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED) return 'disconnected';
+	if (status === js_andruavMessages.CONST_SOCKET_STATUS_ERROR) return event.failed === true ? 'failed' : 'socket_error';
+	return '';
+}
+
+function fn_setTelemetryRecoveryState(p_andruavUnit, state, note, attempt = 0, maxAttempts = 0) {
 	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
 	p_andruavUnit.m_Telemetry.m_udpProxy_recovery_state = state;
 	p_andruavUnit.m_Telemetry.m_udpProxy_status_note = note || '';
+	p_andruavUnit.m_Telemetry.m_udpProxy_retry_count = attempt || 0;
+	p_andruavUnit.m_Telemetry.m_udpProxy_retry_max = maxAttempts || 0;
+	fn_opsHealthHandleTelemetryRecovery(
+		p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : null,
+		state,
+		note || '',
+		{ unitName: p_andruavUnit.m_unitName, log: false, attempt: attempt || 0, maxAttempts: maxAttempts || 0 }
+	);
 	js_eventEmitter.fn_dispatch(js_event.EE_onProxyInfoUpdated, p_andruavUnit);
 }
 
@@ -1832,6 +2006,94 @@ function fn_clearTelemetryRecoveryJob(partyID) {
 	if (!job) return;
 	if (job.timer) clearTimeout(job.timer);
 	delete v_udpRecoveryJobs[partyID];
+}
+
+function fn_getOnlineVehicleUnits() {
+	const list = js_globals?.m_andruavUnitList;
+	if (!list || typeof list.fn_getUnitValues !== 'function') return [];
+	const values = list.fn_getUnitValues() || [];
+	return values.filter((unit) => (
+		unit
+		&& unit.m_defined === true
+		&& unit.m_IsGCS !== true
+		&& unit.m_IsDisconnectedFromGCS !== true
+		&& unit.m_IsShutdown !== true
+	));
+}
+
+export async function fn_retryConnectionNow() {
+	v_wsReconnectCancelled = false;
+	fn_clearWsReconnectTimer();
+	if (js_andruav_ws.AndruavClientWS.getSocketStatus() === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
+		fn_opsHealthAddEvent({
+			source: 'ws',
+			level: 'info',
+			message: 'Retry WS ignored: already connected'
+		});
+		return true;
+	}
+	const email = js_andruavAuth.m_username || js_localStorage.fn_getEmail();
+	const accessCode = js_andruavAuth.m_accesscode || js_localStorage.fn_getAccessCode();
+	if (!email || !accessCode) {
+		fn_dispatchRetryStatus(false, true, 'Missing credentials for reconnect', v_wsReconnectAttempts, 'missing_credentials');
+		fn_opsHealthAddEvent({
+			source: 'ws',
+			level: 'error',
+			message: 'Retry WS failed: missing credentials'
+		});
+		return false;
+	}
+
+	v_wsReconnectAttempts = Math.min(v_wsReconnectAttempts + 1, WS_RECONNECT_MAX_ATTEMPTS);
+	fn_dispatchRetryStatus(true, false, 'Manual retry requested', v_wsReconnectAttempts, 'manual_retry');
+	fn_opsHealthAddEvent({
+		source: 'ws',
+		level: 'info',
+		message: `Manual Retry WS requested (${v_wsReconnectAttempts}/${WS_RECONNECT_MAX_ATTEMPTS})`
+	});
+
+	const ok = await fn_login(email, accessCode, false, true);
+	if (!ok) {
+		fn_dispatchRetryStatus(false, true, 'Manual reconnect failed', v_wsReconnectAttempts, 'manual_retry_failed');
+		return false;
+	}
+	return true;
+}
+
+export function fn_cancelConnectionRetry() {
+	v_wsReconnectCancelled = true;
+	fn_clearWsReconnectTimer();
+	fn_dispatchRetryStatus(false, true, 'Reconnect canceled by operator', v_wsReconnectAttempts, 'retry_canceled');
+	fn_opsHealthAddEvent({
+		source: 'ws',
+		level: 'warn',
+		message: `Reconnect canceled by operator after attempt ${v_wsReconnectAttempts}/${WS_RECONNECT_MAX_ATTEMPTS}`,
+	});
+}
+
+export function fn_recoverAllTelemetry() {
+	const units = fn_getOnlineVehicleUnits();
+	let triggered = 0;
+	for (const unit of units) {
+		if (!unit) continue;
+		fn_recoverTelemetry(unit, {
+			reason: 'bulk_recover',
+			maxAttempts: UDP_RECOVERY_MAX_ATTEMPTS,
+			pollMs: UDP_RECOVERY_POLL_MS,
+			force: true,
+		});
+		triggered += 1;
+	}
+
+	fn_opsHealthAddEvent({
+		source: 'udp',
+		level: triggered > 0 ? 'info' : 'warn',
+		message: triggered > 0
+			? `Bulk UDP recovery started for ${triggered} vehicle(s)`
+			: 'Bulk UDP recovery skipped: no online vehicles',
+	});
+	fn_opsHealthSyncFromUnits();
+	return triggered;
 }
 
 export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
@@ -1867,7 +2129,7 @@ export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
 			return;
 		}
 
-		fn_setTelemetryRecoveryState(liveUnit, 'recovering', '');
+		fn_setTelemetryRecoveryState(liveUnit, 'recovering', '', attemptNo, maxAttempts);
 		fn_diag('udp', 'recover_attempt', {
 			partyID: partyID,
 			attempt: attemptNo,
@@ -1888,14 +2150,14 @@ export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
 
 			js_globals.v_andruavFacade.API_requestUdpProxyStatus(refreshedUnit);
 			if (refreshedUnit.m_Telemetry.m_udpProxy_active === true) {
-				fn_setTelemetryRecoveryState(refreshedUnit, 'idle', '');
+				fn_setTelemetryRecoveryState(refreshedUnit, 'idle', '', attemptNo, maxAttempts);
 				fn_diag('udp', 'recover_success', { partyID: partyID, attempt: attemptNo, reason: reason });
 				fn_clearTelemetryRecoveryJob(partyID);
 				return;
 			}
 
 			if (attemptNo >= maxAttempts) {
-				fn_setTelemetryRecoveryState(refreshedUnit, 'inactive', 'drone-side-inactive');
+				fn_setTelemetryRecoveryState(refreshedUnit, 'inactive', 'drone-side-inactive', attemptNo, maxAttempts);
 				fn_diag('udp', 'recover_failed', { partyID: partyID, attempts: attemptNo, reason: reason });
 				fn_clearTelemetryRecoveryJob(partyID);
 				return;
@@ -1921,6 +2183,7 @@ var EVT_onOpen = function () {
 
 	js_globals.v_connectRetries = 0;
 	v_wsReconnectAttempts = 0;
+	v_wsReconnectCancelled = false;
 	fn_clearWsReconnectTimer();
 	fn_diag('ws', 'registered', { retriesReset: true });
 
@@ -1931,40 +2194,61 @@ var EVT_onOpen = function () {
 			fn_recoverTelemetry(unit, { reason: 'ws_open_auto', maxAttempts: 1 });
 		}
 	}
+	fn_opsHealthSyncFromUnits();
 }
 
 // called when Websocket Closed
 var EVT_onClose = function () {
 	const closeReason = v_lastSocketStatusEvent?.closeReason || '';
 	const closeCode = v_lastSocketStatusEvent?.closeCode;
+	const closeReasonCode = fn_socketReasonCodeFromEvent(v_lastSocketStatusEvent || {}, js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED);
 	const detailReason = closeReason
 		? `WebSocket closed (${closeCode || 'n/a'}): ${closeReason}`
 		: `WebSocket closed (${closeCode || 'n/a'})`;
+	const deterministicReason = closeReasonCode ? `${detailReason} [${closeReasonCode}]` : detailReason;
 
 	if (js_globals.v_connectState !== true) {
 		js_speak.fn_speak('Disconnected');
-		fn_diag('ws', 'closed_user_requested', { reason: detailReason });
+		fn_diag('ws', 'closed_user_requested', { reason: deterministicReason });
+		fn_opsHealthHandleSocketStatus({
+			status: js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED,
+			retrying: false,
+			failed: false,
+			reason: deterministicReason,
+			reasonCode: 'user_disconnect',
+			attempt: v_wsReconnectAttempts,
+			maxAttempts: WS_RECONNECT_MAX_ATTEMPTS
+		});
+		return;
+	}
+
+	if (v_wsReconnectCancelled === true) {
+		fn_dispatchRetryStatus(false, true, 'Reconnect canceled by operator', v_wsReconnectAttempts, 'retry_canceled');
+		fn_diag('ws', 'reconnect_canceled', {
+			attempt: v_wsReconnectAttempts,
+			reason: deterministicReason
+		});
 		return;
 	}
 
 	if (v_wsReconnectAttempts >= WS_RECONNECT_MAX_ATTEMPTS) {
-		fn_dispatchRetryStatus(false, true, `Reconnect attempts exhausted. ${detailReason}`, v_wsReconnectAttempts);
+		fn_dispatchRetryStatus(false, true, `Reconnect attempts exhausted. ${deterministicReason}`, v_wsReconnectAttempts, 'retries_exhausted');
 		js_speak.fn_speak('Disconnected');
 		fn_diag('ws', 'reconnect_exhausted', {
 			attempts: v_wsReconnectAttempts,
 			maxAttempts: WS_RECONNECT_MAX_ATTEMPTS,
-			reason: detailReason
+			reason: deterministicReason
 		});
 		return;
 	}
 
 	v_wsReconnectAttempts += 1;
 	const delayMs = WS_RECONNECT_BASE_DELAY_MS * v_wsReconnectAttempts;
-	fn_dispatchRetryStatus(true, false, `Retrying connection. ${detailReason}`, v_wsReconnectAttempts);
+	fn_dispatchRetryStatus(true, false, `Retrying connection. ${deterministicReason}`, v_wsReconnectAttempts, 'retry_scheduled');
 	fn_diag('ws', 'reconnect_scheduled', {
 		attempt: v_wsReconnectAttempts,
 		delayMs: delayMs,
-		reason: detailReason
+		reason: deterministicReason
 	});
 	fn_clearWsReconnectTimer();
 	v_wsReconnectTimer = setTimeout(async function () {
@@ -1972,7 +2256,7 @@ var EVT_onClose = function () {
 		const email = js_andruavAuth.m_username || js_localStorage.fn_getEmail();
 		const accessCode = js_andruavAuth.m_accesscode || js_localStorage.fn_getAccessCode();
 		if (!email || !accessCode) {
-			fn_dispatchRetryStatus(false, true, 'Missing credentials for reconnect', v_wsReconnectAttempts);
+			fn_dispatchRetryStatus(false, true, 'Missing credentials for reconnect', v_wsReconnectAttempts, 'missing_credentials');
 			fn_diag('ws', 'reconnect_aborted_missing_credentials', {});
 			return;
 		}
@@ -1981,7 +2265,7 @@ var EVT_onClose = function () {
 		if (!ok) {
 			fn_diag('auth', 'reconnect_login_failed', { attempt: v_wsReconnectAttempts });
 			if (v_wsReconnectAttempts >= WS_RECONNECT_MAX_ATTEMPTS) {
-				fn_dispatchRetryStatus(false, true, 'Reconnect failed after retries', v_wsReconnectAttempts);
+				fn_dispatchRetryStatus(false, true, 'Reconnect failed after retries', v_wsReconnectAttempts, 'reconnect_failed');
 			} else {
 				EVT_onClose();
 			}
@@ -1994,11 +2278,18 @@ var EVT_onClose = function () {
 function fn_onSocketStatus(me, event) {
 	v_lastSocketStatusEvent = event;
 	const status = event.status;
+	const reason = event.reason || event.closeReason || event.errorKind || '';
+	const reasonCode = fn_socketReasonCodeFromEvent(event, status);
 	const enrichedEvent = {
 		...event,
+		reason: reason,
+		reasonCode: reasonCode,
 		retrying: event.retrying === true,
-		failed: event.failed === true
+		failed: event.failed === true,
+		attempt: Number.isFinite(event.attempt) ? event.attempt : v_wsReconnectAttempts,
+		maxAttempts: Number.isFinite(event.maxAttempts) ? event.maxAttempts : WS_RECONNECT_MAX_ATTEMPTS
 	};
+	fn_opsHealthHandleSocketStatus(enrichedEvent);
 	js_eventEmitter.fn_dispatch(js_event.EE_onSocketStatus, enrichedEvent);
 
 	if (status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
@@ -2017,6 +2308,15 @@ export function fn_requestWayPoints(p_andruavUnit, fromFCB) {
 	if (partyID && js_globals.v_waypointsCache.hasOwnProperty(partyID) === true) {
 		delete js_globals.v_waypointsCache[partyID];
 	}
+	if (partyID) {
+		fn_missionIntegrityMarkReadRequested(partyID, p_andruavUnit.m_unitName || partyID);
+		fn_opsHealthAddEvent({
+			source: 'mission',
+			level: 'info',
+			partyID: partyID,
+			message: `Mission read requested for ${p_andruavUnit.m_unitName || partyID}`
+		});
+	}
 	if (fromFCB === true) {
 		// Ensure old mission does not remain visible while reading latest mission from FCB.
 		deleteWayPointsofDrone(p_andruavUnit, []);
@@ -2033,6 +2333,17 @@ export function fn_clearWayPoints(p_andruavUnit) {
 	fn_do_modal_confirmation("Delete Mission for " + p_andruavUnit.m_unitName,
 		"Are you sure you want to delete mission & geo-fences", function (p_approved) {
 			if (p_approved === false) return;
+			fn_missionIntegrityMarkDroneMutationExpected(
+				p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+				'remote_delete_requested',
+				p_andruavUnit.m_unitName || ''
+			);
+			fn_opsHealthAddEvent({
+				source: 'mission',
+				level: 'warn',
+				partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+				message: `Mission marked stale for ${p_andruavUnit.m_unitName || 'unit'} (remote delete requested)`
+			});
 			js_globals.v_andruavFacade.API_requestDeleteWayPoints(p_andruavUnit);
 			js_globals.v_andruavFacade.API_requestDeleteFenceByName(p_andruavUnit);
 		}, "YES", "bg-danger text-white");
@@ -2042,6 +2353,15 @@ export function fn_clearWayPointsFromMap(p_andruavUnit) {
 	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
 
 	deleteWayPointsofDrone(p_andruavUnit, []);
+	if (p_andruavUnit.getPartyID) {
+		fn_missionIntegrityMarkMapCleared(p_andruavUnit.getPartyID(), p_andruavUnit.m_unitName || '');
+		fn_opsHealthAddEvent({
+			source: 'mission',
+			level: 'warn',
+			partyID: p_andruavUnit.getPartyID(),
+			message: `Mission map cleared for ${p_andruavUnit.m_unitName || 'unit'}`
+		});
+	}
 	js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 }
 
@@ -2105,9 +2425,31 @@ export function fn_putWayPoints_direct(p_andruavUnit, p_eraseFirst, p_files) {
 			try {
 				const plan_text = new TextDecoder("utf-8").decode(evt.target.result); // Convert to string
 				if (is_de_file === true) {
+					fn_missionIntegrityMarkDroneMutationExpected(
+						p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+						'mission_upload_requested',
+						p_andruavUnit.m_unitName || ''
+					);
+					fn_opsHealthAddEvent({
+						source: 'mission',
+						level: 'warn',
+						partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+						message: `Mission marked stale for ${p_andruavUnit.m_unitName || 'unit'} (upload requested)`
+					});
 					js_globals.v_andruavFacade.API_uploadDEMission(p_andruavUnit, p_eraseFirst, JSON.parse(plan_text));
 				}
 				else {
+					fn_missionIntegrityMarkDroneMutationExpected(
+						p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+						'mission_upload_requested',
+						p_andruavUnit.m_unitName || ''
+					);
+					fn_opsHealthAddEvent({
+						source: 'mission',
+						level: 'warn',
+						partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+						message: `Mission marked stale for ${p_andruavUnit.m_unitName || 'unit'} (upload requested)`
+					});
 					js_globals.v_andruavFacade.API_uploadWayPoints(p_andruavUnit, p_eraseFirst, plan_text);
 				}
 
@@ -2130,10 +2472,16 @@ var EVT_onDeleted = function () {
 		js_globals.v_andruavWS.fn_disconnect();
 	}
 	fn_clearWsReconnectTimer();
+	fn_clearGpsRenderJobs();
 	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
 	js_globals.v_andruavClient = null;
 	js_globals.v_andruavFacade = null;
 	js_globals.v_andruavWS = null;
+	fn_opsHealthSyncFromUnits();
+	fn_uiStateReset();
+	fn_uiAlertsReset();
+	fn_missionIntegrityReset();
+	fn_commandFeedbackReset();
 
 };
 
@@ -2142,6 +2490,40 @@ function EVT_unitOnlineChanged(me, p_andruavUnit) {
 	if (p_andruavUnit.m_IsGCS === true) return;
 	if (p_andruavUnit.m_IsDisconnectedFromGCS === true) return;
 	fn_recoverTelemetry(p_andruavUnit, { reason: 'unit_online_auto', maxAttempts: 1 });
+	fn_opsHealthSyncFromUnits();
+	fn_applyUIFocusRendering();
+	fn_applyMissionLayerStylesAll();
+}
+
+function EVT_unitHighlightedUI(me, p_andruavUnit) {
+	if (!p_andruavUnit || typeof p_andruavUnit.getPartyID !== 'function') return;
+	fn_setUIActiveUnit(p_andruavUnit.getPartyID());
+	fn_applyUIFocusRendering();
+}
+
+function EVT_uiFocusChanged() {
+	fn_applyUIFocusRendering();
+}
+
+function EVT_uiMissionLayerChanged() {
+	fn_applyMissionLayerStylesAll();
+}
+
+function EVT_onProxyInfoUpdated(me, p_andruavUnit) {
+	if (!p_andruavUnit || p_andruavUnit.m_IsGCS === true) return;
+	fn_opsHealthHandleProxyInfo(p_andruavUnit);
+}
+
+function EVT_onVideoStreamStartedOps(me, data) {
+	const unit = data?.andruavUnit;
+	if (!unit || typeof unit.getPartyID !== 'function') return;
+	fn_opsHealthHandleVideoState(unit.getPartyID(), true, unit.m_unitName || '');
+}
+
+function EVT_onVideoStreamStoppedOps(me, data) {
+	const unit = data?.andruavUnit;
+	if (!unit || typeof unit.getPartyID !== 'function') return;
+	fn_opsHealthHandleVideoState(unit.getPartyID(), false, unit.m_unitName || '');
 }
 
 
@@ -2198,6 +2580,7 @@ var EVT_msgFromUnit_WayPointsUpdated = function (me, data) {
 			}
 		}
 	}
+	fn_applyMissionLayerStyleForUnit(p_andruavUnit);
 }
 
 var EVT_msgFromUnit_WayPoints = function (me, data) {
@@ -2214,7 +2597,20 @@ var EVT_msgFromUnit_WayPoints = function (me, data) {
 
 	deleteWayPointsofDrone(p_andruavUnit, wayPointArray);
 
-	if (wayPointArray.length === 0) return;
+	if (wayPointArray.length === 0) {
+		fn_missionIntegrityUpdateFromDroneMission(
+			p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			p_andruavUnit.m_unitName || '',
+			[]
+		);
+		fn_opsHealthAddEvent({
+			source: 'mission',
+			level: 'info',
+			partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			message: `Mission sync complete for ${p_andruavUnit.m_unitName || 'unit'} (empty mission)`
+		});
+		return;
+	}
 	let latlng = null;
 	for (let i = 0; i < wayPointArray.length; ++i) {
 		let subIcon = false;
@@ -2325,6 +2721,18 @@ var EVT_msgFromUnit_WayPoints = function (me, data) {
 	if (LngLatPoints.length > 0) {
 		p_andruavUnit.m_wayPoint.polylines = js_leafletmap.fn_drawMissionPolyline(LngLatPoints, js_globals.flightPath_colors[p_andruavUnit.m_index % 4]);
 	}
+	fn_missionIntegrityUpdateFromDroneMission(
+		p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+		p_andruavUnit.m_unitName || '',
+		wayPointArray
+	);
+	fn_opsHealthAddEvent({
+		source: 'mission',
+		level: 'info',
+		partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+		message: `Mission sync complete for ${p_andruavUnit.m_unitName || 'unit'} (${wayPointArray.length} items)`
+	});
+	fn_applyMissionLayerStyleForUnit(p_andruavUnit);
 }
 
 
@@ -2344,10 +2752,24 @@ function EVT_andruavUnitFCBUpdated(me, p_andruavUnit) {
 function EVT_andruavUnitFlyingUpdated(me, p_andruavUnit) {
 	if (p_andruavUnit.m_isFlying === true) {
 		js_speak.fn_speak(p_andruavUnit.m_unitName + ' is Flying');
+		fn_uiAlertsAdd({
+			level: 'warn',
+			source: 'flight',
+			partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			message: `${p_andruavUnit.m_unitName} is flying`
+		});
 	}
 	else {
 		js_speak.fn_speak(p_andruavUnit.m_unitName + ' is on ground');
+		fn_uiAlertsAdd({
+			level: 'info',
+			source: 'flight',
+			partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			message: `${p_andruavUnit.m_unitName} is on ground`
+		});
 	}
+	fn_refreshVehicleMarkerIcon(p_andruavUnit, true);
+	js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 }
 
 
@@ -2380,8 +2802,7 @@ function changedeg(element, degree) {
 }
 
 function EVT_andruavUnitVehicleTypeUpdated(me, p_andruavUnit) {
-	const v_htmlTitle = "<p class='text-white margin_zero fs-6'>" + p_andruavUnit.m_unitName + "</p>";
-	js_leafletmap.fn_setVehicleIcon(p_andruavUnit.m_gui.m_marker, getVehicleIcon(p_andruavUnit, (js_globals.CONST_MAP_GOOLE === true)), p_andruavUnit.m_unitName, null, false, false, v_htmlTitle, [64, 64]);
+	fn_refreshVehicleMarkerIcon(p_andruavUnit, true);
 }
 
 
@@ -2400,11 +2821,24 @@ function EVT_andruavUnitArmedUpdated(me, p_andruavUnit) {
 
 	if (p_andruavUnit.m_isArmed) {
 		js_speak.fn_speak('ARMED');
+		fn_uiAlertsAdd({
+			level: 'warn',
+			source: 'arm',
+			partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			message: `${p_andruavUnit.m_unitName} armed`
+		});
 	}
 	else {
 		js_speak.fn_speak('Disarmed');
+		fn_uiAlertsAdd({
+			level: 'info',
+			source: 'arm',
+			partyID: p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '',
+			message: `${p_andruavUnit.m_unitName} disarmed`
+		});
 	}
 
+	fn_refreshVehicleMarkerIcon(p_andruavUnit, true);
 	js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 }
 
@@ -2500,6 +2934,43 @@ export function fn_getUnitThemeColor(p_andruavUnit) {
 	return fn_getUnitColorPalette(p_andruavUnit);
 }
 
+function fn_refreshVehicleMarkerIcon(p_andruavUnit, force = false) {
+	if (!p_andruavUnit || !p_andruavUnit.m_gui || !p_andruavUnit.m_gui.m_marker) return;
+
+	try {
+		const marker = p_andruavUnit.m_gui.m_marker;
+		const nextIconUrl = getVehicleIcon(p_andruavUnit, (js_globals.CONST_MAP_GOOLE === true));
+		if (!nextIconUrl) return;
+
+		const prevIconUrl =
+			(p_andruavUnit.m_gui.m_marker_icon_url || '')
+			|| (marker?.options?.icon?.options?.iconUrl || '')
+			|| '';
+
+		if (force !== true && prevIconUrl === nextIconUrl) {
+			return;
+		}
+
+		const v_htmlTitle = `<p class='text-white margin_zero fs-6'>${p_andruavUnit.m_unitName || ''}</p>`;
+		js_leafletmap.fn_setVehicleIcon(
+			marker,
+			nextIconUrl,
+			p_andruavUnit.m_unitName,
+			null,
+			false,
+			false,
+			v_htmlTitle,
+			[64, 64]
+		);
+		p_andruavUnit.m_gui.m_marker_icon_url = nextIconUrl;
+	} catch (error) {
+		console.warn('[MAP] failed to refresh vehicle marker icon', {
+			partyID: p_andruavUnit?.getPartyID ? p_andruavUnit.getPartyID() : '',
+			err: error?.message || error
+		});
+	}
+}
+
 /**
    Called when message [js_andruavMessages.CONST_TYPE_AndruavMessage_GPS] is received from a UNIT or GCS holding IMU Statistics
  */
@@ -2543,6 +3014,7 @@ function EVT_msgFromUnit_GPS(me, p_andruavUnit) {
 			const v_htmlTitle = "<p class='text-white margin_zero fs-6'>" + p_andruavUnit.m_unitName + "</p>";
 			// Add new Vehicle
 			p_andruavUnit.m_gui.m_marker = js_leafletmap.fn_CreateMarker(v_image, getLabel(), null, false, false, v_htmlTitle, [64, 64]);
+			p_andruavUnit.m_gui.m_marker_icon_url = v_image;
 			js_globals.v_vehicle_gui[p_andruavUnit.getPartyID()] = p_andruavUnit.m_gui;
 
 			js_leafletmap.fn_addListenerOnClickMarker(p_andruavUnit.m_gui.m_marker,
@@ -2626,9 +3098,7 @@ function EVT_msgFromUnit_GPS(me, p_andruavUnit) {
 
 		}
 
-		js_leafletmap.fn_setPosition_bylatlng(p_andruavUnit.m_gui.m_marker, p_andruavUnit.m_Nav_Info.p_Location.lat, p_andruavUnit.m_Nav_Info.p_Location.lng, p_andruavUnit.m_Nav_Info.p_Orientation.yaw);
-		fn_tryAutoCenterOnFirstConnectedVehicle(p_andruavUnit);
-		js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
+		fn_scheduleGpsMarkerRender(p_andruavUnit);
 	}
 	else {
 
@@ -2705,8 +3175,12 @@ var EVT_andruavUnitAdded = function (me, p_andruavUnit) {
 	// }
 
 	js_speak.fn_speak(p_andruavUnit.m_unitName + " unit added");
+	if (!js_globals.v_ui_active_party_id && p_andruavUnit?.getPartyID) {
+		fn_setUIActiveUnit(p_andruavUnit.getPartyID());
+	}
 
 	js_eventEmitter.fn_dispatch(js_event.EE_unitAdded, p_andruavUnit);
+	fn_opsHealthSyncFromUnits();
 }
 
 
@@ -2857,6 +3331,12 @@ var EVT_andruavUnitError = function (me, data) {
 	c_msg.m_cssclass = v_cssclass;
 	c_msg.m_error = p_error;
 	js_eventEmitter.fn_dispatch(js_event.EE_onMessage, c_msg);
+	fn_uiAlertsAdd({
+		level: (v_notification_Type === 'error' || v_notification_Type === 'critical' || v_notification_Type === 'alert' || v_notification_Type === 'emergency') ? 'error' : (v_notification_Type === 'warning' ? 'warn' : 'info'),
+		source: 'unit',
+		partyID: p_andruavUnit?.getPartyID ? p_andruavUnit.getPartyID() : '',
+		message: `${p_andruavUnit.m_unitName}: ${p_error.Description}`
+	});
 
 
 
@@ -3223,6 +3703,7 @@ function fn_connectWebSocket(me) {
 		js_globals.v_andruavClient = js_andruav_parser.AndruavClientParser;
 		js_globals.v_andruavFacade = js_andruav_facade.AndruavClientFacade;
 		js_globals.v_andruavWS = js_andruav_ws.AndruavClientWS;
+		fn_commandFeedbackInit();
 
 		js_globals.v_andruavWS.fn_init();
 		const authPartyID = js_andruavAuth.fn_getPartyID();
@@ -3283,10 +3764,25 @@ function fn_connectWebSocket(me) {
 		js_eventEmitter.fn_subscribe(js_event.EE_andruavUnitFightModeUpdated, this, EVT_andruavUnitFightModeUpdated);
 		js_eventEmitter.fn_subscribe(js_event.EE_andruavUnitVehicleTypeUpdated, this, EVT_andruavUnitVehicleTypeUpdated);
 		js_eventEmitter.fn_subscribe(js_event.EE_unitOnlineChanged, this, EVT_unitOnlineChanged);
+		js_eventEmitter.fn_subscribe(js_event.EE_unitHighlighted, this, EVT_unitHighlightedUI);
+		js_eventEmitter.fn_subscribe(js_event.EE_uiFocusChanged, this, EVT_uiFocusChanged);
+		js_eventEmitter.fn_subscribe(js_event.EE_uiMissionLayerChanged, this, EVT_uiMissionLayerChanged);
+		js_eventEmitter.fn_subscribe(js_event.EE_onProxyInfoUpdated, this, EVT_onProxyInfoUpdated);
+		js_eventEmitter.fn_subscribe(js_event.EE_videoStreamStarted, this, EVT_onVideoStreamStartedOps);
+		js_eventEmitter.fn_subscribe(js_event.EE_videoStreamStopped, this, EVT_onVideoStreamStoppedOps);
 
 		js_eventEmitter.fn_subscribe(js_event.EE_unitSDRTrigger, this, EVT_andruavUnitSDRTrigger);
 
 
+		fn_opsHealthHandleSocketStatus({
+			status: js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING,
+			retrying: false,
+			failed: false,
+			reason: 'Opening WebSocket',
+			attempt: v_wsReconnectAttempts,
+			maxAttempts: WS_RECONNECT_MAX_ATTEMPTS
+		});
+		fn_opsHealthSyncFromUnits();
 
 		js_globals.v_andruavWS.fn_connect(js_andruavAuth.fn_getSessionID());
 	}
@@ -3297,15 +3793,28 @@ export function fn_logout() {
 	fn_resetMapAutoCenterState();
 	js_globals.v_connectState = false;
 	v_wsReconnectAttempts = 0;
+	v_wsReconnectCancelled = false;
 	fn_clearWsReconnectTimer();
 	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
+	fn_clearGpsRenderJobs();
 	js_andruavAuth.fn_retryLogin(false);
+	fn_opsHealthAddEvent({
+		source: 'auth',
+		level: 'info',
+		message: 'Logout requested'
+	});
+	fn_opsHealthReset();
+	fn_uiStateReset();
+	fn_uiAlertsReset();
+	fn_missionIntegrityReset();
+	fn_commandFeedbackReset();
 	js_andruavAuth.fn_do_logoutAccount();
 	js_andruav_ws.AndruavClientWS.API_delMe();
 }
 
 export function fn_connect(p_email, p_access_code) {
 	js_globals.v_connectState = true;
+	v_wsReconnectCancelled = false;
 	if (js_andruav_ws.AndruavClientWS.isSocketConnectionDone() === true) {
 		fn_logout();
 	}
@@ -3399,6 +3908,9 @@ export function fn_on_ready() {
 
 
 	fn_showMap();
+	fn_opsHealthSyncFromUnits();
+	fn_applyUIFocusRendering();
+	fn_applyMissionLayerStylesAll();
 
 	if (js_globals.CONST_MAP_EDITOR !== true) {
 		gui_hidesubmenus();

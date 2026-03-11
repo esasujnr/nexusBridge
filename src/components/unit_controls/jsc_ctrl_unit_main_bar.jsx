@@ -3,7 +3,6 @@ import { withTranslation } from 'react-i18next';
 
 import * as js_helpers from '../../js/js_helpers.js'
 import * as js_andruavUnit from '../../js/js_andruavUnit.js';
-import * as js_common from '../../js/js_common.js'
 import { fn_getUnitColorPalette } from '../../js/js_unit_colors.js';
 
 import { js_globals } from '../../js/js_globals.js';
@@ -56,6 +55,11 @@ class ClssCtrlUnitMainBar extends React.Component {
   }
 
   fn_onUpdate(me, p_andruavUnit) {
+    if (p_andruavUnit && me.props?.p_unit?.getPartyID && p_andruavUnit.getPartyID) {
+      if (String(p_andruavUnit.getPartyID()) !== String(me.props.p_unit.getPartyID())) {
+        return;
+      }
+    }
     if (me.m_flag_mounted === false) return;
     me.setState({ m_update: me.state.m_update + 1 });
   }
@@ -170,8 +174,8 @@ class ClssCtrlUnitMainBar extends React.Component {
     const unitColor = fn_getUnitColorPalette(v_andruavUnit).primary;
 
     let online_comment = t('unitBar:noSignalInfo'); // "no signal info"
-    let online_class;
-    let online_class2;
+    let online_class = 'nb-unit-status-pill';
+    let online_class2 = 'nb-unit-status-text';
     let online_text;
     let camera_class = ' camera_inactive ';
     let video_class = ' video_inactive ';
@@ -182,17 +186,14 @@ class ClssCtrlUnitMainBar extends React.Component {
     const module_version = v_andruavUnit.module_version();
 
     if (v_andruavUnit.m_IsDisconnectedFromGCS === true || v_andruavUnit.m_IsShutdown === true) {
-      online_class2 = ' blink_offline ';
-      online_class = ' blink_offline ';
+      online_class = 'nb-unit-status-pill nb-unit-status-pill--offline';
       online_text = t('unitBar:offline'); // "offline"
     } else {
       if (v_andruavUnit.m_isArmed === true) {
-        online_class2 = ' text-info ';
-        online_class = ' bg-none blink_alert';
+        online_class = 'nb-unit-status-pill nb-unit-status-pill--armed';
         online_text = t('armed'); // "Armed"
       } else {
-        online_class2 = ' text-info ';
-        online_class = ' blink_success ';
+        online_class = 'nb-unit-status-pill nb-unit-status-pill--online';
         online_text = t('unitBar:online'); // "online"
       }
       if (v_andruavUnit.fn_canCamera() === true) {
@@ -222,35 +223,6 @@ class ClssCtrlUnitMainBar extends React.Component {
       if (!v_andruavUnit.m_IsDisconnectedFromGCS && !v_andruavUnit.m_IsShutdown) {
         if (v_andruavUnit.m_SignalStatus.mobile === true) {
           let level = v_andruavUnit.m_SignalStatus.mobileSignalLevel;
-          if (v_andruavUnit.m_SignalStatus.mobileNetworkTypeRank < js_helpers.CONST_TELEPHONE_400G) {
-            if (level < -100) {
-              online_class = ' badge badge-default ';
-            } else if (level < -95 || v_andruavUnit.m_SignalStatus.mobileNetworkTypeRank <= js_helpers.CONST_TELEPHONE_200G) {
-              online_class = ' badge badge-danger ';
-            } else if (level < -80 || v_andruavUnit.m_SignalStatus.mobileNetworkTypeRank <= js_helpers.CONST_TELEPHONE_250G) {
-              online_class = ' badge badge-warning ';
-            } else if (level < -70 || v_andruavUnit.m_SignalStatus.mobileNetworkTypeRank <= js_helpers.CONST_TELEPHONE_300G) {
-              online_class = ' badge badge-info ';
-            } else if (level < -60) {
-              online_class = ' badge badge-primary ';
-            } else {
-              online_class = ' badge badge-success ';
-            }
-          } else {
-            if (level < -140) {
-              online_class = ' badge badge-default ';
-            } else if (level < -124) {
-              online_class = ' badge badge-danger ';
-            } else if (level < -108) {
-              online_class = ' badge badge-warning ';
-            } else if (level < -92) {
-              online_class = ' badge badge-info ';
-            } else if (level < -80) {
-              online_class = ' badge badge-primary ';
-            } else {
-              online_class = ' badge badge-success ';
-            }
-          }
           online_comment = t('unitBar:networkSignal', {
             networkType: js_helpers.v_NETWORK_G_TYPE[v_andruavUnit.m_SignalStatus.mobileNetworkTypeRank],
             networkName: js_helpers.v_NETWORK_G_TYPE[v_andruavUnit.m_SignalStatus.mobileNetworkType],
@@ -259,7 +231,6 @@ class ClssCtrlUnitMainBar extends React.Component {
         }
       }
     }
-    js_common.fn_console_log('online_comment:' + online_comment);
 
     let rows = [];
     let sys_id = '';
@@ -278,6 +249,7 @@ class ClssCtrlUnitMainBar extends React.Component {
             <img
               className={v_battery_display.css}
               src={v_battery_display.m_battery_src}
+              alt=""
               title={t('unitBar:andruavBatteryTooltip', {
                 level: v_battery_display.level,
                 charging: v_battery_display.charging,
@@ -292,6 +264,7 @@ class ClssCtrlUnitMainBar extends React.Component {
           <img
             className={v_battery_display_fcb.css}
             src={v_battery_display_fcb.m_battery_src}
+            alt=""
             title={t('unitBar:fcbBatteryTooltip', {
               remaining: parseFloat(v_andruavUnit.m_Power._FCB.p_Battery.FCB_BatteryRemaining).toFixed(1),
               voltage: (v_andruavUnit.m_Power._FCB.p_Battery.FCB_BatteryVoltage / 1000).toFixed(2),
@@ -315,7 +288,7 @@ class ClssCtrlUnitMainBar extends React.Component {
           >
             <strong style={{ color: unitColor }}>{v_andruavUnit.m_unitName} </strong>
             {sys_id}
-            <span className={' ' + online_class}>{online_text}</span>
+            <span className={online_class} title={online_comment}>{online_text}</span>
           </p>
         </div>
       );
@@ -326,6 +299,7 @@ class ClssCtrlUnitMainBar extends React.Component {
             <img
               className={v_battery_display.css}
               src={v_battery_display.m_battery_src}
+              alt=""
               title={t('unitBar:andruavBatteryTooltip', {
                 level: v_battery_display.level,
                 charging: v_battery_display.charging,
@@ -347,7 +321,7 @@ class ClssCtrlUnitMainBar extends React.Component {
             onClick={() => fn_changeUnitInfo(v_andruavUnit)}
           >
             <strong style={{ color: unitColor }}>{v_andruavUnit.m_unitName + ' '}</strong>
-            <span className={' ' + online_class}>{online_text}</span>
+            <span className={online_class} title={online_comment}>{online_text}</span>
           </p>
         </div>
       );
@@ -359,13 +333,13 @@ class ClssCtrlUnitMainBar extends React.Component {
           <ClssCtrlUnitIcon p_unit={v_andruavUnit} />
         </div>
         <div key={id + '__2'} className="col-1 padding_zero d-none d-sm-flex align-self-baseline">
-          <img className={camera_class} title={t('unitBar:takePhoto')} onClick={() => this.fn_toggleCamera(v_andruavUnit)} />
+          <img className={camera_class} alt="" title={t('unitBar:takePhoto')} onClick={() => this.fn_toggleCamera(v_andruavUnit)} />
         </div>
         <div key={id + '__3'} className="col-1 padding_zero d-none d-sm-flex align-self-baseline">
-          <img className={video_class} title={t('unitBar:startLiveStream')} onClick={() => toggleVideo(v_andruavUnit)} />
+          <img className={video_class} alt="" title={t('unitBar:startLiveStream')} onClick={() => toggleVideo(v_andruavUnit)} />
         </div>
         <div key={id + '__4'} className="col-1 padding_zero d-none d-sm-flex align-self-baseline">
-          <img className={recvideo_class} title={t('unitBar:startRecordingOnDrone')} onClick={() => toggleRecrodingVideo(v_andruavUnit)} />
+          <img className={recvideo_class} alt="" title={t('unitBar:startRecordingOnDrone')} onClick={() => toggleRecrodingVideo(v_andruavUnit)} />
         </div>
         {rows}
       </div>

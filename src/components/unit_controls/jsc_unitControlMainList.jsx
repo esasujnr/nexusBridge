@@ -49,6 +49,8 @@ class ClssAndruavUnitList extends React.Component {
 		};
 
         this.m_flag_mounted = false;
+        this.m_updateTimer = null;
+        this.m_pendingStatePatch = null;
 
         js_eventEmitter.fn_subscribe (js_event.EE_requestGamePadonPreferenceChanged, this, this.fn_onPreferenceChanged);
         js_eventEmitter.fn_subscribe (js_event.EE_requestGamePadonSocketStatus, this, this.fn_onSocketStatus);
@@ -65,15 +67,15 @@ class ClssAndruavUnitList extends React.Component {
     {
         if (p_me.m_flag_mounted === false) return ;
 
-        p_me.setState({m_active_partyID: p_andruavUnit.getPartyID()});
+        p_me.fn_scheduleUpdate(p_me, { m_active_partyID: p_andruavUnit.getPartyID() });
     }
       
-    fn_unitOnlineChanged(me,p_andruavUnit)
+    fn_unitOnlineChanged(me)
     {
         if (me.m_flag_mounted === false) return ;
         
         // render is initiated via updating state
-        me.setState({ 'm_update': me.state.m_update+1});
+        me.fn_scheduleUpdate(me);
     }
 
     fn_unitAdded (me,p_andruavUnit)
@@ -99,8 +101,10 @@ class ClssAndruavUnitList extends React.Component {
         }
         else
         {				
-                me.state.andruavUnitPartyIDs = [];
-                me.setState({'m_update': me.state.m_update +1});
+                me.setState({
+                    andruavUnitPartyIDs: [],
+                    m_update: me.state.m_update + 1
+                });
         }
     }
 
@@ -111,7 +115,28 @@ class ClssAndruavUnitList extends React.Component {
     fn_onPreferenceChanged(me)
     {
         if (me.m_flag_mounted === false) return ;
-        me.setState({'m_update': me.state.m_update +1});
+        me.fn_scheduleUpdate(me);
+    }
+
+    fn_scheduleUpdate(me, patch = null) {
+        if (me.m_flag_mounted === false) return;
+        if (patch && typeof patch === 'object') {
+            me.m_pendingStatePatch = {
+                ...(me.m_pendingStatePatch || {}),
+                ...patch
+            };
+        }
+        if (me.m_updateTimer !== null) return;
+        me.m_updateTimer = setTimeout(() => {
+            me.m_updateTimer = null;
+            if (me.m_flag_mounted === false) return;
+            const nextPatch = me.m_pendingStatePatch || {};
+            me.m_pendingStatePatch = null;
+            me.setState({
+                m_update: me.state.m_update + 1,
+                ...nextPatch
+            });
+        }, 90);
     }
 
     fn_updateMapStatus(p_andruavUnit)
@@ -130,6 +155,10 @@ class ClssAndruavUnitList extends React.Component {
 
 
     componentWillUnmount () {
+        if (this.m_updateTimer !== null) {
+            clearTimeout(this.m_updateTimer);
+            this.m_updateTimer = null;
+        }
         js_eventEmitter.fn_unsubscribe (js_event.EE_requestGamePadonPreferenceChanged,this);
         js_eventEmitter.fn_unsubscribe (js_event.EE_requestGamePadonSocketStatus,this);
         js_eventEmitter.fn_unsubscribe(js_event.EE_unitAdded,this);
@@ -165,23 +194,23 @@ class ClssAndruavUnitList extends React.Component {
         }
         if ((v_andruavUnit.m_IsDisconnectedFromGCS === true) || (v_andruavUnit.m_IsShutdown === true))
         {
-            statusClass = " blink_offline ";
+            statusClass = "nb-status-dot--offline";
         }
         else
         {
             if (bad_fcb === true) 
             {
-                    statusClass = " blink_warning animate_iteration_5s ";
-                    warningIconClass = " bi bi-exclamation-diamond-fill blink_warning animate_iteration_5s ";
+                    statusClass = "nb-status-dot--warning";
+                    warningIconClass = " bi bi-exclamation-diamond-fill text-warning ms-1 ";
             }
             else 
             if (v_andruavUnit.m_isArmed === true) 
             {
-                statusClass = " blink_alert animate_iteration_3s";
+                statusClass = "nb-status-dot--armed";
             }
             else
             {
-                statusClass = " blink_success animate_iteration_3s ";
+                statusClass = "nb-status-dot--online";
             }
 
             
@@ -226,14 +255,13 @@ class ClssAndruavUnitList extends React.Component {
             
             const v_prop = this.props;
             
-            sortedPartyIDs.map(function (object)
-            {
+            sortedPartyIDs.forEach(function (object) {
                 
                 const partyID = object.getPartyID();
                 const v_andruavUnit = object;
                 
                 // dont display if unit is not defined yet.
-                if ((v_andruavUnit==null) || (v_andruavUnit.m_defined !== true))return ;
+                if ((v_andruavUnit==null) || (v_andruavUnit.m_defined !== true)) return;
                 
                 if ((v_prop.gcs_list !== false) && (v_andruavUnit.m_IsGCS === true))
                 {
@@ -252,9 +280,10 @@ class ClssAndruavUnitList extends React.Component {
                         units_header.push(
                             <li id={'h' + partyID} key={'h' + partyID} className="nav-item nav-units">
                                 <a 
-                                className={`nav-link user-select-none txt-theme-aware  ${c_active === true ? '' : ''}`} data-bs-toggle="tab" href={"#tab_" + v_andruavUnit.getPartyID()}>
+                                className={`nav-link user-select-none txt-theme-aware  ${c_active === true ? '' : ''}`} data-bs-toggle="tab" href={"#tab_" + v_andruavUnit.getPartyID()}
+                                onClick={() => js_eventEmitter.fn_dispatch(js_event.EE_unitHighlighted, v_andruavUnit)}>
                                     <span className="unit-tab-title" style={{ color: unitColor }}>{header_info.text}</span>
-                                    <span className={'unit-tab-status-dot' + header_info.statusClass}>&#9679;</span>
+                                    <span className={`unit-tab-status-dot ${header_info.statusClass}`}>&#9679;</span>
                                     {header_info.warningIconClass !== '' && <i className={header_info.warningIconClass}></i>}
                                 </a>
                             </li>

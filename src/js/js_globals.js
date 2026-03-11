@@ -17,6 +17,10 @@ class GLOBALS {
 		this.m_markGuided = null;
 
 		this.v_waypointsCache = {};
+		this.v_ui_focus_mode = false;
+		this.v_ui_focus_party_id = null;
+		this.v_ui_active_party_id = null;
+		this.v_ui_mission_layers = {};
 
 		this.m_current_tab_status = 'unknown';
 		
