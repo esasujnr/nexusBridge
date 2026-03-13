@@ -60,8 +60,15 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
   }
 
+  fn_markManualTelemetryOverride(p_andruavUnit) {
+    if (p_andruavUnit == null || p_andruavUnit.m_Telemetry == null) return;
+    p_andruavUnit.m_Telemetry.m_bridge_manual_override = true;
+    p_andruavUnit.m_Telemetry.m_bridge_manual_override_at = Date.now();
+  }
+
   fn_changeTelemetryOptimizationLevel(p_andruavUnit, step) {
     if (p_andruavUnit == null) return;
+    this.fn_markManualTelemetryOverride(p_andruavUnit);
     let next_step = p_andruavUnit.m_Telemetry.m_telemetry_level + step;
     if (next_step < 0) next_step = 0;
     if (next_step > 3) next_step = 3;
@@ -72,12 +79,14 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
 
   fn_pauseTelemetry(p_andruavUnit) {
     if (p_andruavUnit == null) return;
+    this.fn_markManualTelemetryOverride(p_andruavUnit);
     js_globals.v_andruavFacade.API_pauseTelemetry(p_andruavUnit);
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
   }
 
   fn_startTelemetry(p_andruavUnit) {
     if (p_andruavUnit == null) return;
+    this.fn_markManualTelemetryOverride(p_andruavUnit);
     js_globals.v_andruavFacade.API_resumeTelemetry(p_andruavUnit);
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
   }
@@ -134,6 +143,32 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     }
   }
 
+  fn_formatStateLabel(state) {
+    const raw = String(state || '').trim().toLowerCase();
+    if (!raw) return 'Unknown';
+
+    switch (raw) {
+      case 'ok': return 'OK';
+      case 'connected': return 'Connected';
+      case 'connecting': return 'Connecting';
+      case 'retrying': return 'Retrying';
+      case 'failed': return 'Failed';
+      case 'error': return 'Error';
+      case 'disconnected': return 'Disconnected';
+      case 'active': return 'Active';
+      case 'inactive': return 'Inactive';
+      case 'recovering': return 'Recovering';
+      case 'paused': return 'Paused';
+      case 'streaming': return 'Streaming';
+      case 'idle': return 'Idle';
+      case 'degraded': return 'Degraded';
+      default:
+        return raw
+          .replaceAll('_', ' ')
+          .replace(/\b\w/g, (ch) => ch.toUpperCase());
+    }
+  }
+
   renderUnitHealth(v_andruavUnit, canControl) {
     const partyID = v_andruavUnit.getPartyID ? v_andruavUnit.getPartyID() : '';
     const snapshot = this.state.m_opsSnapshot || fn_opsHealthSnapshot();
@@ -153,51 +188,65 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     const shortDroneChecksum = String(droneChecksum).slice(0, 8);
     const shortMapChecksum = String(mapChecksum).slice(0, 8);
     const missionStale = missionState?.stale === true || missionState?.pendingRead === true;
+    const wsStateLabel = this.fn_formatStateLabel(wsState);
+    const udpStateLabel = this.fn_formatStateLabel(udpState);
+    const videoStateLabel = this.fn_formatStateLabel(videoState);
+    const missionLabel = `D${missionState?.droneVersion || 0}/M${missionState?.mapVersion || 0}`;
 
     return (
       <div className="ops-unit-health" dir={this.props.i18n.language === 'ar' ? 'rtl' : 'ltr'}>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">WS</span>
-          <span className={this.fn_getHealthClass(wsState)}>{wsState}</span>
+        <div className="ops-unit-health-grid">
+          <div className="ops-unit-chip" title={`WebSocket: ${wsStateLabel}`}>
+            <span className="ops-unit-chip__label">WS</span>
+            <span className={this.fn_getHealthClass(wsState)}>{wsStateLabel}</span>
+          </div>
+          <div className="ops-unit-chip" title={`UDP: ${udpStateLabel}`}>
+            <span className="ops-unit-chip__label">UDP</span>
+            <span className={this.fn_getHealthClass(udpState)}>{udpStateLabel}</span>
+          </div>
+          <div className="ops-unit-chip" title={`Video: ${videoStateLabel}`}>
+            <span className="ops-unit-chip__label">Video</span>
+            <span className={this.fn_getHealthClass(videoState)}>{videoStateLabel}</span>
+          </div>
+          <div className="ops-unit-chip" title={`WebSocket retry: ${wsRetryCount}/${wsRetryMax || '?'}`}>
+            <span className="ops-unit-chip__label">WS Retry</span>
+            <span className="ops-unit-state is-idle">{wsRetryCount}/{wsRetryMax || '?'}</span>
+          </div>
+          <div className="ops-unit-chip" title={`UDP retry: ${udpRetryCount}/${udpRetryMax || '?'}`}>
+            <span className="ops-unit-chip__label">UDP Retry</span>
+            <span className="ops-unit-state is-idle">{udpRetryCount}/{udpRetryMax || '?'}</span>
+          </div>
+          <div className="ops-unit-chip" title={`Mission: ${missionLabel}`}>
+            <span className="ops-unit-chip__label">Mission</span>
+            <span className={this.fn_getHealthClass(missionStale ? 'degraded' : 'active')}>
+              {missionLabel}
+            </span>
+          </div>
         </div>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">UDP</span>
-          <span className={this.fn_getHealthClass(udpState)}>{udpState}</span>
-        </div>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">WS Retry</span>
-          <span className="ops-unit-state is-idle">{wsRetryCount}/{wsRetryMax || '?'}</span>
-        </div>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">Video</span>
-          <span className={this.fn_getHealthClass(videoState)}>{videoState}</span>
-        </div>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">UDP Retry</span>
-          <span className="ops-unit-state is-idle">{udpRetryCount}/{udpRetryMax || '?'}</span>
-        </div>
-        <div className="ops-unit-health-row">
-          <span className="ops-unit-label">Mission</span>
-          <span className={this.fn_getHealthClass(missionStale ? 'degraded' : 'active')}>
-            D{missionState?.droneVersion || 0}/M{missionState?.mapVersion || 0}
-          </span>
-        </div>
-        <div className={`ops-unit-note ${missionStale ? 'is-stale' : ''}`}>
-          chk d:{shortDroneChecksum} | m:{shortMapChecksum}
-          {missionStale ? ` | stale:${missionState?.staleReason || 'pending_read'}` : ''}
+        <div className={`ops-unit-checksum ${missionStale ? 'is-stale' : ''}`}>
+          <span className="ops-unit-checksum__title">chk</span>
+          <code>d:{shortDroneChecksum}</code>
+          <code>m:{shortMapChecksum}</code>
+          {missionStale ? (
+            <span className="ops-unit-checksum__flag" title={missionState?.staleReason || 'pending_read'}>
+              stale
+            </span>
+          ) : null}
         </div>
         {udpNote && (
           <div className="ops-unit-note">{udpNote}</div>
         )}
-        <button
-          type="button"
-          className="btn btn-sm ops-unit-btn"
-          title={canControl ? 'Force UDP recovery' : 'Read-only: no control permission'}
-          disabled={canControl !== true}
-          onClick={() => this.fn_recoverTelemetry(v_andruavUnit)}
-        >
-          UDP Refresh
-        </button>
+        <div className="ops-unit-actions">
+          <button
+            type="button"
+            className="btn btn-sm ops-unit-btn"
+            title={canControl ? 'Force UDP recovery' : 'Read-only: no control permission'}
+            disabled={canControl !== true}
+            onClick={() => this.fn_recoverTelemetry(v_andruavUnit)}
+          >
+            UDP Refresh
+          </button>
+        </div>
       </div>
     );
   }

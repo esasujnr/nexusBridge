@@ -1,6 +1,6 @@
-{
+﻿{
     "CONST_TEST_MODE": false,
-    "CONST_PROD_MODE_IP": "cloud.ardupilot.org",
+    "CONST_PROD_MODE_IP": "192.168.1.211",
     "CONST_PROD_MODE_PORT": "19408",
     "CONST_TEST_MODE_IP": "127.0.0.1",
     "CONST_TEST_MODE_PORT": "19408",
@@ -58,7 +58,7 @@
         "ENABLED_LANGUAGES": [
             {
                 "code": "ar",
-                "label": "عربى",
+                "label": "Ø¹Ø±Ø¨Ù‰",
                 "className": "rtl"
             },
             {
@@ -66,11 +66,11 @@
                 "label": "English",
                 "className": ""
             },
-            { "code": "fr", "label": "Français", "className": "" },
-            { "code": "es", "label": "Español", "className": "" },
+            { "code": "fr", "label": "FranÃ§ais", "className": "" },
+            { "code": "es", "label": "EspaÃ±ol", "className": "" },
             {
                 "code": "ru",
-                "label": "Русский",
+                "label": "Ð ÑƒÑÑÐºÐ¸Ð¹",
                 "className": ""
             }
         ],
@@ -99,3 +99,4 @@
         }
     ]
 }
+

@@ -12,6 +12,8 @@ function ClssSafetyHoldButton(props) {
     completeTimer: null,
     progressTimer: null,
     startedAt: 0,
+    confirmed: false,
+    pointerActive: false,
   });
 
   const fn_stop = () => {
@@ -24,6 +26,7 @@ function ClssSafetyHoldButton(props) {
       ref.current.progressTimer = null;
     }
     ref.current.startedAt = 0;
+    ref.current.pointerActive = false;
     setIsHolding(false);
     setProgress(0);
   };
@@ -32,6 +35,8 @@ function ClssSafetyHoldButton(props) {
     if (disabled) return;
     fn_stop();
     ref.current.startedAt = Date.now();
+    ref.current.confirmed = false;
+    ref.current.pointerActive = true;
     setIsHolding(true);
     setProgress(0);
 
@@ -42,6 +47,7 @@ function ClssSafetyHoldButton(props) {
     }, 40);
 
     ref.current.completeTimer = setTimeout(() => {
+      ref.current.confirmed = true;
       fn_stop();
       if (typeof props.onConfirm === 'function') {
         props.onConfirm();
@@ -66,9 +72,20 @@ function ClssSafetyHoldButton(props) {
     fn_start();
   };
 
+  const fn_handlePointerUp = (event) => {
+    event.stopPropagation();
+    const shouldTap = ref.current.pointerActive === true && ref.current.confirmed !== true;
+    fn_stop();
+    if (shouldTap && typeof props.onTap === 'function') {
+      props.onTap(event);
+    }
+    ref.current.confirmed = false;
+  };
+
   const fn_handlePointerStop = (event) => {
     event.stopPropagation();
     fn_stop();
+    ref.current.confirmed = false;
   };
 
   return (
@@ -78,7 +95,7 @@ function ClssSafetyHoldButton(props) {
       className={`${props.className || ''} ${isHolding ? 'nb-safety-hold-btn is-holding' : 'nb-safety-hold-btn'}`}
       title={props.title || 'Press and hold to confirm'}
       onPointerDown={fn_handlePointerDown}
-      onPointerUp={fn_handlePointerStop}
+      onPointerUp={fn_handlePointerUp}
       onPointerLeave={fn_handlePointerStop}
       onPointerCancel={fn_handlePointerStop}
       onContextMenu={(event) => event.preventDefault()}

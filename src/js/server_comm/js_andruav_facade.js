@@ -63,6 +63,7 @@ class CAndruavClientFacade {
         this.v_sendAxes_skip = 0;
         this.lastSentAxes = null;
         this.lastSentTime = 0;
+        this._commandCooldownByKey = Object.create(null);
 
         this.fn_init();
 
@@ -105,6 +106,18 @@ class CAndruavClientFacade {
         // Reset other resources
         this.v_axes = null;
         this.v_sendAxes = false;
+        this._commandCooldownByKey = Object.create(null);
+    }
+
+    _isCommandCoolingDown(commandKey, cooldownMs) {
+        const now = Date.now();
+        const until = this._commandCooldownByKey[commandKey] || 0;
+        if (until > now) {
+            return true;
+        }
+
+        this._commandCooldownByKey[commandKey] = now + cooldownMs;
+        return false;
     }
 
     // EVENT HANDLER AREA
@@ -695,12 +708,18 @@ class CAndruavClientFacade {
 
         // DO NOT Send this command globally to all units. It is a unit specific command.
         // TODO: Restrict this from SERVER
-        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return;
+        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return false;
 
         const c_party = p_andruavUnit != null ? p_andruavUnit.getPartyID() : null;
+        if (!c_party) return false;
+        if (this._isCommandCoolingDown(`delete_wp:${c_party}`, 2500) === true) {
+            js_common.fn_console_log(`[MissionGuard] ignored repeated delete-waypoints request for ${c_party}`);
+            return false;
+        }
 
         const cmd = CCommandAPI.API_requestDeleteWayPoints();
         js_andruav_ws.AndruavClientWS.API_sendCMD(c_party, cmd.mt, cmd.ms);
+        return true;
     };
 
 
@@ -794,12 +813,19 @@ class CAndruavClientFacade {
     }
 
     API_requestWayPoints(p_andruavUnit, p_enableFCB) {
-        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return;
+        if (p_andruavUnit.getPartyID() === null || p_andruavUnit.getPartyID() === undefined) return false;
         let msg = {};
+        const c_party = p_andruavUnit.getPartyID();
         if (p_enableFCB === true) {
             msg.C = js_andruavMessages.CONST_RemoteCommand_RELOAD_WAY_POINTS_FROM_FCB;
         } else {
             msg.C = js_andruavMessages.CONST_RemoteCommand_GET_WAY_POINTS;
+        }
+
+        const cooldownMs = p_enableFCB === true ? 3500 : 1500;
+        if (this._isCommandCoolingDown(`request_wp:${c_party}:${msg.C}`, cooldownMs) === true) {
+            js_common.fn_console_log(`[MissionGuard] ignored repeated waypoint request for ${c_party} cmd:${msg.C}`);
+            return false;
         }
 
         if (js_globals.v_waypointsCache.hasOwnProperty(p_andruavUnit.getPartyID()) === true) {
@@ -808,6 +834,7 @@ class CAndruavClientFacade {
             delete js_globals.v_waypointsCache[p_andruavUnit.getPartyID()];
         }
         js_andruav_ws.AndruavClientWS.API_sendCMD(p_andruavUnit.getPartyID(), js_andruavMessages.CONST_TYPE_AndruavMessage_RemoteExecute, msg);
+        return true;
     };
 
 
@@ -1302,29 +1329,26 @@ class CAndruavClientFacade {
 
     API_requestMavlinkHeartBeat(p_andruavUnit)
     {
-        let v_partyID= '';
+        this.API_requestMavlinkMessageById(p_andruavUnit, mavlink20.MAVLINK_MSG_ID_HEARTBEAT);
+    }
+
+    API_requestMavlinkMessageById(p_andruavUnit, p_msgID)
+    {
+        let v_partyID = '';
 
         if (p_andruavUnit !== null && p_andruavUnit !== undefined)
         {
             v_partyID = p_andruavUnit.getPartyID();
         }
 
-        const cmd = CCommandAPI.API_requestMavlinkMsg(mavlink20.MAVLINK_MSG_ID_HEARTBEAT);
-        js_andruav_ws.AndruavClientWS.API_sendCMD(v_partyID, cmd.mt, cmd.ms);
+        const cmd = CCommandAPI.API_requestMavlinkMsg(p_msgID);
+        return js_andruav_ws.AndruavClientWS.API_sendCMD(v_partyID, cmd.mt, cmd.ms);
     }
 
 
     API_requestMavlinkServoChannel(p_andruavUnit)
     {
-        let v_partyID= '';
-
-        if (p_andruavUnit !== null && p_andruavUnit !== undefined)
-        {
-            v_partyID = p_andruavUnit.getPartyID();
-        }
-
-        const cmd = CCommandAPI.API_requestMavlinkMsg(mavlink20.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW);
-        js_andruav_ws.AndruavClientWS.API_sendCMD(v_partyID, cmd.mt, cmd.ms);
+        this.API_requestMavlinkMessageById(p_andruavUnit, mavlink20.MAVLINK_MSG_ID_SERVO_OUTPUT_RAW);
     }
 
     // receives event from gamepad and store it for sending.

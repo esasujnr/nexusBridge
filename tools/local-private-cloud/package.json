@@ -1,0 +1,9 @@
+{
+  "name": "nexusbridge-local-private-cloud-tools",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "selfsigned": "^2.4.1"
+  }
+}

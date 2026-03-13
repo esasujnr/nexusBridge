@@ -2,11 +2,10 @@
 import React    from 'react';
 
 import { js_globals } from '../../js/js_globals.js';
-import {js_speak} from '../../js/js_speak'
 import { js_andruavAuth } from '../../js/js_andruav_auth.js';
 import ClssSafetyHoldButton from '../common/jsc_safety_hold_button.jsx';
 
-import {fn_auditAction, fn_do_modal_confirmation, fn_changeAltitude, gui_doYAW} from '../../js/js_main'
+import {fn_auditAction, fn_changeAltitude, gui_doYAW} from '../../js/js_main'
 import * as js_andruavUnit from '../../js/js_andruavUnit.js';
 
 export class ClssCtrlPx4FlightControl extends React.Component {
@@ -255,37 +254,16 @@ export class ClssCtrlPx4FlightControl extends React.Component {
     fn_doArm(v_andruavUnit) { //bug no need to pass parameter
         if (this.fn_canArmDisarm(v_andruavUnit, 'ARM') !== true) return;
         if (this.props.v_andruavUnit !== null && this.props.v_andruavUnit !== undefined) {
-            fn_do_modal_confirmation("DANGEROUS: FORCE ADMING  " + this.props.v_andruavUnit.m_unitName + "   " + this.props.v_andruavUnit.m_VehicleType_TXT,
-                "OVERRIDE ARM .. Are You SURE?", function (p_approved) {
-                    if (p_approved === false) 
-                    {
-                        const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, false);
-                        fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'ARM requested' : 'ARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
-                        return;
-                    }
-                    else
-                    {
-					    js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                        const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, true);
-                        fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'FORCED ARM requested' : 'FORCED ARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
-                        return ;
-                    }
-                }, "FORCED-ARM", "bg-danger txt-theme-aware", "ARM");
+            const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, true, false);
+            fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'ARM requested' : 'ARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
         }
     }
 
     fn_doDisarm(v_andruavUnit) {
         if (this.fn_canArmDisarm(v_andruavUnit, 'DISARM') !== true) return;
         if (this.props.v_andruavUnit !== null && this.props.v_andruavUnit !== undefined) {
-            fn_do_modal_confirmation("DANGEROUS: EMERGENCY DISARM  " + this.props.v_andruavUnit.m_unitName + "   " + this.props.v_andruavUnit.m_VehicleType_TXT,
-                "STOP all MOTORS and if vehicle in air will CRASH. Are You SURE?", function (p_approved) {
-                    if (p_approved === false) return;
-					js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                    const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, false, true);
-                    fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'DISARM requested' : 'DISARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
-                }, "KILL-MOTORS", "bg-danger txt-theme-aware");
-
-
+            const sent = js_globals.v_andruavFacade.API_do_Arm(v_andruavUnit, false, false);
+            fn_auditAction(sent === true ? 'warn' : 'error', v_andruavUnit?.getPartyID?.() || '', `${sent === true ? 'DISARM requested' : 'DISARM send failed'} for ${v_andruavUnit?.m_unitName || 'unit'}`);
         }
     }
 

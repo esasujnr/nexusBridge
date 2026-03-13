@@ -115,6 +115,7 @@ const UDP_RECOVERY_MAX_ATTEMPTS = 2;
 const UDP_RECOVERY_POLL_MS = 1200;
 const UDP_RECOVERY_COOLDOWN_MS = 8000;
 const GPS_MARKER_UPDATE_MIN_MS = 120;
+const MISSION_READ_LOCK_TIMEOUT_MS = 12000;
 let v_wsReconnectTimer = null;
 let v_wsReconnectAttempts = 0;
 let v_wsReconnectCancelled = false;
@@ -122,6 +123,30 @@ let v_lastSocketStatusEvent = null;
 const v_udpRecoveryJobs = {};
 const v_udpRecoveryCooldown = {};
 const v_gpsRenderJobs = {};
+const v_missionReadLocks = Object.create(null);
+const v_missionReadLockTimers = Object.create(null);
+
+function fn_clearMissionReadLock(partyID) {
+	if (!partyID) return;
+	delete v_missionReadLocks[partyID];
+	const timer = v_missionReadLockTimers[partyID];
+	if (timer) {
+		clearTimeout(timer);
+		delete v_missionReadLockTimers[partyID];
+	}
+}
+
+function fn_tryMissionReadLock(partyID) {
+	if (!partyID) return true;
+	if (v_missionReadLocks[partyID] === true) return false;
+	v_missionReadLocks[partyID] = true;
+	const oldTimer = v_missionReadLockTimers[partyID];
+	if (oldTimer) clearTimeout(oldTimer);
+	v_missionReadLockTimers[partyID] = setTimeout(() => {
+		fn_clearMissionReadLock(partyID);
+	}, MISSION_READ_LOCK_TIMEOUT_MS);
+	return true;
+}
 
 function fn_diag(subsystem, stage, data = {}) {
 	try {
@@ -2106,6 +2131,13 @@ export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
 	const pollMs = Number.isFinite(p_options.pollMs) ? Math.max(500, parseInt(p_options.pollMs, 10)) : UDP_RECOVERY_POLL_MS;
 	const reason = p_options.reason || 'manual';
 	const force = p_options.force === true;
+	const manualOverride = p_andruavUnit?.m_Telemetry?.m_bridge_manual_override === true;
+
+	// Respect explicit operator telemetry switch actions during automatic recovery triggers.
+	if (manualOverride === true && (reason === 'ws_open_auto' || reason === 'unit_online_auto')) {
+		return;
+	}
+
 	const now = Date.now();
 	const lastAt = v_udpRecoveryCooldown[partyID] || 0;
 
@@ -2303,8 +2335,12 @@ function fn_onSocketStatus(me, event) {
 };
 
 export function fn_requestWayPoints(p_andruavUnit, fromFCB) {
-	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	if (p_andruavUnit === null || p_andruavUnit === undefined) return false;
 	const partyID = p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : null;
+	const fromFlightController = fromFCB === true;
+	if (fromFlightController === true && fn_tryMissionReadLock(partyID) !== true) {
+		return false;
+	}
 	if (partyID && js_globals.v_waypointsCache.hasOwnProperty(partyID) === true) {
 		delete js_globals.v_waypointsCache[partyID];
 	}
@@ -2317,14 +2353,21 @@ export function fn_requestWayPoints(p_andruavUnit, fromFCB) {
 			message: `Mission read requested for ${p_andruavUnit.m_unitName || partyID}`
 		});
 	}
-	if (fromFCB === true) {
+	if (fromFlightController === true) {
 		// Ensure old mission does not remain visible while reading latest mission from FCB.
 		deleteWayPointsofDrone(p_andruavUnit, []);
 		js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
 	}
+	const waypointRequestSent = js_globals.v_andruavFacade.API_requestWayPoints(p_andruavUnit, fromFCB);
+	if (waypointRequestSent === false) {
+		if (fromFlightController === true) {
+			fn_clearMissionReadLock(partyID);
+		}
+		return false;
+	}
 	js_globals.v_andruavFacade.API_do_GetHomeLocation(p_andruavUnit);
-	js_globals.v_andruavFacade.API_requestWayPoints(p_andruavUnit, fromFCB);
 	js_globals.v_andruavFacade.API_requestGeoFencesAttachStatus(p_andruavUnit);
+	return true;
 }
 
 export function fn_clearWayPoints(p_andruavUnit) {
@@ -2351,6 +2394,10 @@ export function fn_clearWayPoints(p_andruavUnit) {
 
 export function fn_clearWayPointsFromMap(p_andruavUnit) {
 	if (p_andruavUnit === null || p_andruavUnit === undefined) return;
+	const partyID = p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '';
+	if (partyID && v_missionReadLocks[partyID] === true) {
+		return false;
+	}
 
 	deleteWayPointsofDrone(p_andruavUnit, []);
 	if (p_andruavUnit.getPartyID) {
@@ -2363,6 +2410,7 @@ export function fn_clearWayPointsFromMap(p_andruavUnit) {
 		});
 	}
 	js_eventEmitter.fn_dispatch(js_event.EE_unitUpdated, p_andruavUnit);
+	return true;
 }
 
 
@@ -2482,6 +2530,7 @@ var EVT_onDeleted = function () {
 	fn_uiAlertsReset();
 	fn_missionIntegrityReset();
 	fn_commandFeedbackReset();
+	Object.keys(v_missionReadLockTimers).forEach((partyID) => fn_clearMissionReadLock(partyID));
 
 };
 
@@ -2590,6 +2639,10 @@ var EVT_msgFromUnit_WayPoints = function (me, data) {
 
 	const p_andruavUnit = data.unit;
 	const wayPointArray = data.wps;
+	const partyID = p_andruavUnit && p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '';
+	if (partyID) {
+		fn_clearMissionReadLock(partyID);
+	}
 
 
 	// TODO HERE >>> DELETE OLD WAYPOINTS AND HIDE THEM FROM MAP
@@ -3288,6 +3341,16 @@ var EVT_DistinationPointChanged = function (me, p_andruavUnit) {
 var EVT_andruavUnitError = function (me, data) {
 	const p_andruavUnit = data.unit;
 	const p_error = data.err;
+	const v_description = ((p_error?.Description) ? p_error.Description : '').trim().toLowerCase();
+
+	// Suppress generic DE MAV_RESULT ACK noise that confuses operators.
+	// Keep all other warnings/errors visible.
+	if (
+		v_description.startsWith('command is not supported (unknown).') ||
+		v_description.startsWith('command is valid, but execution has failed.')
+	) {
+		return;
+	}
 
 	let v_notification_Type;
 	let v_cssclass = 'good';
@@ -3783,6 +3846,7 @@ function fn_connectWebSocket(me) {
 			maxAttempts: WS_RECONNECT_MAX_ATTEMPTS
 		});
 		fn_opsHealthSyncFromUnits();
+		js_websocket_bridge.fn_init();
 
 		js_globals.v_andruavWS.fn_connect(js_andruavAuth.fn_getSessionID());
 	}

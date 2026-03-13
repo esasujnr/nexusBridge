@@ -9,7 +9,6 @@ import * as js_andruavMessages from '../../js/protocol/js_andruavMessages';
 import ClssCtrlUDPPoxyTelemetry from '../gadgets/jsc_ctrl_udp_proxy_telemetry.jsx';
 import { ClssCtrlHUD } from '../gadgets/jsc_ctrl_hudControl.jsx';
 import { ClssCtrlDirections } from '../gadgets/jsc_ctrl_directions_control.jsx';
-import ClssCtrlSWARM from '../gadgets/jsc_ctrl_swarm.jsx';
 import { ClssCtrlDrone_Speed_Ctrl } from '../gadgets/jsc_ctrl_speed_control.jsx';
 import { ClssCtrlDrone_Altitude_Ctrl } from '../gadgets/jsc_ctrl_altitude_control.jsx';
 import ClssCtrlDrone_FlightMode_Ctrl from '../gadgets/jsc_ctrl_flight_mode_control.jsx';
@@ -311,26 +310,21 @@ class ClssCtrlDroneIMU extends React.Component {
                 </div>
 
                 <div key={'yaw_ctrl' + v_andruavUnit.getPartyID()} className="row al_l bg-gradient css_margin_zero user-select-none">
-                    <div key="yaw_ctrl1" className="col-6 col-sm-4 padding_zero css_border_right_faint css_padding_horizontal_5">
+                    <div key="yaw_ctrl1" className="col-12 col-sm-4 padding_zero css_border_right_faint css_padding_horizontal_5">
                         <p id="yaw" className="rounded-3 text-white css_margin_zero">
                             <small>{v_yaw_text}</small>
                         </p>
                         <div id="imu_v_yaw_knob">{v_yaw_knob}</div>
-                    </div>
-                    <div key="yaw_ctrl2" className="col-6 col-sm-3 padding_zero css_border_right_faint css_padding_horizontal_5">
                         <p id="bearing" className="rounded-3 text-white css_margin_zero">
-                            <small>{v_bearing_text}</small>
+                            <small className="text-capitalize">{v_bearing_text}</small>
                         </p>
                         <div id="bearing_main" className="css_margin_zero">
                             <div id="bearingknob">{v_bearing_knob}</div>
                             <div id="bearingtargetknob">{v_bearingTarget_knob}</div>
                         </div>
                     </div>
-                    <div key={'telem' + v_andruavUnit.getPartyID()} className="col-6 col-sm-3 padding_zero css_user_select_text css_border_right_faint css_padding_horizontal_5">
+                    <div key={'telem' + v_andruavUnit.getPartyID()} className="col-12 col-sm-8 padding_zero css_user_select_text css_padding_horizontal_5">
                         <ClssCtrlUDPPoxyTelemetry key={'ctele' + v_andruavUnit.getPartyID()} p_unit={v_andruavUnit} />
-                    </div>
-                    <div key={'swarm' + v_andruavUnit.getPartyID()} className="col-6 col-sm-2 padding_zero css_padding_horizontal_5">
-                        <ClssCtrlSWARM key={'cswarm' + v_andruavUnit.getPartyID()} className="row padding_zero" p_unit={v_andruavUnit} />
                     </div>
                 </div>
             </div>

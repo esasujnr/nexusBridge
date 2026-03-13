@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { EVENTS as js_event } from '../../js/js_eventList.js';
 import { js_eventEmitter } from '../../js/js_eventEmitter.js';
 import { js_andruavAuth } from '../../js/js_andruav_auth.js';
 import {
   fn_opsHealthSnapshot,
   fn_opsHealthClearHistory,
+  fn_opsHealthAddEvent,
 } from '../../js/js_ops_health.js';
 import {
   fn_retryConnectionNow,
@@ -14,6 +15,7 @@ import {
 import {
   fn_missionIntegritySnapshot,
 } from '../../js/js_mission_integrity.js';
+import { js_websocket_bridge } from '../../js/CPC/js_websocket_bridge.js';
 
 function fn_stateClass(state) {
   switch (state) {
@@ -58,6 +60,37 @@ function fn_formatTime(ts) {
   }
 }
 
+function fn_formatBytes(value) {
+  const size = Number(value || 0);
+  if (!Number.isFinite(size) || size <= 0) return '0 B';
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(2)} MB`;
+  if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${Math.round(size)} B`;
+}
+
+function fn_formatAge(ts) {
+  const time = Number(ts || 0);
+  if (!Number.isFinite(time) || time <= 0) return '-';
+  const ageMs = Math.max(0, Date.now() - time);
+  const totalSec = Math.floor(ageMs / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}m ${sec}s`;
+}
+
+function fn_policyClass(mode) {
+  switch (mode) {
+    case 'primary':
+      return 'is-primary';
+    case 'fallback':
+      return 'is-fallback';
+    case 'degraded':
+      return 'is-degraded';
+    default:
+      return 'is-standby';
+  }
+}
+
 function ClssOpsHealthPanel() {
   const fn_getInitialCollapsed = () => {
     if (typeof window === 'undefined' || !window.localStorage) return false;
@@ -72,8 +105,20 @@ function ClssOpsHealthPanel() {
   const [busyRetry, setBusyRetry] = useState(false);
   const [busyRecover, setBusyRecover] = useState(false);
   const [busyCancel, setBusyCancel] = useState(false);
+  const [busyBridge, setBusyBridge] = useState(false);
   const [selectedPartyID, setSelectedPartyID] = useState('all');
   const [isCollapsed, setIsCollapsed] = useState(fn_getInitialCollapsed);
+  const [bridgeEnabled, setBridgeEnabled] = useState(js_websocket_bridge.fn_isEnabled() === true);
+  const [bridgeConnected, setBridgeConnected] = useState(js_websocket_bridge.fn_isConnected() === true);
+  const [bridgeStats, setBridgeStats] = useState(() => js_websocket_bridge.fn_getRuntimeStats());
+  const policyWarnRef = useRef({ signature: '', at: 0 });
+
+  const fn_syncBridgeState = () => {
+    const stats = js_websocket_bridge.fn_getRuntimeStats();
+    setBridgeEnabled(stats.enabled === true);
+    setBridgeConnected(stats.connected === true);
+    setBridgeStats(stats);
+  };
 
   useEffect(() => {
     const listener = {
@@ -82,13 +127,20 @@ function ClssOpsHealthPanel() {
 
     const onUpdate = (me, nextSnapshot) => {
       setSnapshot(nextSnapshot || fn_opsHealthSnapshot());
+      fn_syncBridgeState();
     };
 
     js_eventEmitter.fn_subscribe(js_event.EE_opsHealthUpdated, listener, onUpdate);
     setSnapshot(fn_opsHealthSnapshot());
+    fn_syncBridgeState();
+
+    const bridgeSyncTimer = window.setInterval(() => {
+      fn_syncBridgeState();
+    }, 1000);
 
     return () => {
       js_eventEmitter.fn_unsubscribe(js_event.EE_opsHealthUpdated, listener);
+      window.clearInterval(bridgeSyncTimer);
     };
   }, []);
 
@@ -98,8 +150,8 @@ function ClssOpsHealthPanel() {
   const udp = snapshot?.global?.udp || {};
   const video = snapshot?.global?.video || {};
   const history = Array.isArray(snapshot?.history) ? snapshot.history : [];
+  const units = useMemo(() => snapshot?.units || {}, [snapshot]);
   const unitRows = useMemo(() => {
-    const units = snapshot?.units || {};
     return Object.keys(units).map((partyID) => ({
       partyID,
       unitName: units[partyID]?.unitName || partyID,
@@ -108,7 +160,82 @@ function ClssOpsHealthPanel() {
       udpRetryCount: units[partyID]?.udp?.retryCount || 0,
       udpRetryMax: units[partyID]?.udp?.retryMax || 0,
     }));
-  }, [snapshot]);
+  }, [units]);
+
+  const linkPolicy = useMemo(() => {
+    const onlineUnits = Object.keys(units).map((partyID) => ({
+      partyID,
+      unitName: units[partyID]?.unitName || partyID,
+      udpState: units[partyID]?.udp?.state || 'inactive',
+      isFlying: units[partyID]?.flight?.flying === true,
+    }));
+    const onlineCount = onlineUnits.length;
+    const flyingUnits = onlineUnits.filter((unit) => unit.isFlying === true);
+    const fallbackFlyingUnits = flyingUnits.filter((unit) => unit.udpState !== 'active');
+    const fallbackFlyingSignature = fallbackFlyingUnits.map((unit) => unit.partyID).sort().join('|');
+
+    if (onlineCount === 0) {
+      return {
+        mode: 'standby',
+        label: 'Standby',
+        detail: 'No vehicles online',
+        fallbackFlyingUnits: [],
+        fallbackFlyingSignature: '',
+      };
+    }
+
+    if (udp.state === 'active') {
+      return {
+        mode: 'primary',
+        label: 'Primary: Smart Telemetry',
+        detail: `${udp.activeUnits || 0}/${udp.totalUnits || onlineCount} units on UDP`,
+        fallbackFlyingUnits,
+        fallbackFlyingSignature,
+      };
+    }
+
+    if (bridgeEnabled === true && bridgeConnected === true) {
+      return {
+        mode: 'fallback',
+        label: 'Fallback: Bridge',
+        detail: 'Smart Telemetry degraded/inactive. Bridge is carrying continuity.',
+        fallbackFlyingUnits,
+        fallbackFlyingSignature,
+      };
+    }
+
+    return {
+      mode: 'degraded',
+      label: 'Degraded: Link Risk',
+      detail: 'Smart Telemetry unavailable and Bridge not connected.',
+      fallbackFlyingUnits,
+      fallbackFlyingSignature,
+    };
+  }, [units, udp.state, udp.activeUnits, udp.totalUnits, bridgeEnabled, bridgeConnected]);
+
+  useEffect(() => {
+    if (linkPolicy.mode !== 'fallback' || !linkPolicy.fallbackFlyingSignature) {
+      policyWarnRef.current.signature = '';
+      return;
+    }
+
+    const now = Date.now();
+    const names = linkPolicy.fallbackFlyingUnits.map((unit) => unit.unitName).join(', ');
+    const signature = `${linkPolicy.mode}:${linkPolicy.fallbackFlyingSignature}`;
+    const staleWarn = (now - Number(policyWarnRef.current.at || 0)) > 45000;
+    const changed = policyWarnRef.current.signature !== signature;
+    if (changed !== true && staleWarn !== true) {
+      return;
+    }
+
+    policyWarnRef.current.signature = signature;
+    policyWarnRef.current.at = now;
+    fn_opsHealthAddEvent({
+      source: 'policy',
+      level: 'warn',
+      message: `Bridge fallback active during flight for: ${names}. Use Smart Telemetry as primary link.`,
+    });
+  }, [linkPolicy.mode, linkPolicy.fallbackFlyingSignature, linkPolicy.fallbackFlyingUnits]);
 
   const filteredHistory = useMemo(() => {
     const rows = Array.isArray(snapshot?.history) ? snapshot.history : [];
@@ -140,6 +267,18 @@ function ClssOpsHealthPanel() {
       title: 'Video',
       state: video.state || 'idle',
       detail: video.detail || '-',
+    },
+    {
+      key: 'bridge',
+      title: 'Bridge',
+      state: bridgeEnabled ? (bridgeConnected ? 'connected' : 'connecting') : 'inactive',
+      detail: bridgeEnabled
+        ? (
+          bridgeConnected
+            ? `Q ${bridgeStats.queueDepth || 0}/${bridgeStats.queueCapacity || 0} | B ${fn_formatBytes(bridgeStats.socketBufferedBytes)}`
+            : `Retry ${bridgeStats.reconnectAttempt || 0} | ${bridgeStats.lastReconnectReason || 'pending'}`
+        )
+        : 'Stopped by operator',
     },
   ];
 
@@ -202,6 +341,32 @@ function ClssOpsHealthPanel() {
     URL.revokeObjectURL(url);
   };
 
+  const onToggleBridge = () => {
+    if (busyBridge) return;
+    setBusyBridge(true);
+    try {
+      const enabled = js_websocket_bridge.fn_isEnabled() === true;
+      if (enabled === true) {
+        js_websocket_bridge.fn_uninit();
+        fn_opsHealthAddEvent({
+          source: 'bridge',
+          level: 'warn',
+          message: 'Telemetry bridge stopped by operator',
+        });
+      } else {
+        js_websocket_bridge.fn_init();
+        fn_opsHealthAddEvent({
+          source: 'bridge',
+          level: 'info',
+          message: 'Telemetry bridge started by operator',
+        });
+      }
+      fn_syncBridgeState();
+    } finally {
+      setTimeout(() => setBusyBridge(false), 250);
+    }
+  };
+
   const onToggleCollapse = () => {
     setIsCollapsed((prev) => {
       const next = !prev;
@@ -234,6 +399,17 @@ function ClssOpsHealthPanel() {
 
       {isCollapsed !== true && (
         <>
+          <div className={`ops-health-policy ${fn_policyClass(linkPolicy.mode)}`}>
+            <div className="ops-health-policy__label">Link Policy</div>
+            <div className="ops-health-policy__value">{linkPolicy.label}</div>
+            <div className="ops-health-policy__detail">{linkPolicy.detail}</div>
+            {linkPolicy.fallbackFlyingUnits.length > 0 && (
+              <div className="ops-health-policy__warn">
+                Flying on fallback: {linkPolicy.fallbackFlyingUnits.map((unit) => unit.unitName).join(', ')}
+              </div>
+            )}
+          </div>
+
           <div className="ops-health-grid">
             {chips.map((chip) => (
               <div key={chip.key} className={`ops-health-chip ${fn_stateClass(chip.state)}`}>
@@ -277,6 +453,17 @@ function ClssOpsHealthPanel() {
 
             <button
               type="button"
+              className={`btn btn-sm ops-health-btn ops-health-btn-power ${bridgeEnabled ? 'is-on' : 'is-off'}`}
+              onClick={onToggleBridge}
+              disabled={busyBridge || canControl !== true}
+              title={canControl === true ? 'Toggle local telemetry bridge forwarding' : 'Read-only: no control permission'}
+            >
+              <span className="bi bi-power" aria-hidden="true"></span>
+              <span>{busyBridge ? 'Updating...' : (bridgeEnabled ? 'Stop Bridge' : 'Start Bridge')}</span>
+            </button>
+
+            <button
+              type="button"
               className="btn btn-sm ops-health-btn"
               onClick={() => fn_opsHealthClearHistory()}
               title="Clear panel history"
@@ -292,6 +479,48 @@ function ClssOpsHealthPanel() {
             >
               Export
             </button>
+          </div>
+
+          <div className="ops-health-bridge-metrics">
+            <div className="ops-health-bridge-metrics-title">Bridge Runtime</div>
+            <div className="ops-health-bridge-metrics-grid">
+              <div className="ops-health-bridge-metric">
+                <span>Queue</span>
+                <strong>{bridgeStats.queueDepth || 0}/{bridgeStats.queueCapacity || 0}</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>Buffered</span>
+                <strong>{fn_formatBytes(bridgeStats.socketBufferedBytes)}</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>TX</span>
+                <strong>{Number(bridgeStats.txPackets || 0).toLocaleString()} / {fn_formatBytes(bridgeStats.txBytes)}</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>RX</span>
+                <strong>{Number(bridgeStats.rxPackets || 0).toLocaleString()} / {fn_formatBytes(bridgeStats.rxBytes)}</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>Route</span>
+                <strong>{Number(bridgeStats.routeDelivered || 0).toLocaleString()} ok | {Number(bridgeStats.routeDropped || 0).toLocaleString()} drop</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>Drops</span>
+                <strong>
+                  BP {Number(bridgeStats.txDropBackpressure || 0).toLocaleString()} |
+                  WS {Number(bridgeStats.txDropSocketUnavailable || 0).toLocaleString()} |
+                  Q {Number(bridgeStats.queueDropsOverflow || 0).toLocaleString()}
+                </strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>Reconnect</span>
+                <strong>{Number(bridgeStats.reconnectAttempt || 0).toLocaleString()} / {Number(bridgeStats.reconnectScheduled || 0).toLocaleString()}</strong>
+              </div>
+              <div className="ops-health-bridge-metric">
+                <span>Last Up/Down</span>
+                <strong>{fn_formatAge(bridgeStats.lastConnectedAt)} / {fn_formatAge(bridgeStats.lastDisconnectedAt)}</strong>
+              </div>
+            </div>
           </div>
 
           <div className="ops-health-filters">

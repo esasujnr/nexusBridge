@@ -28,6 +28,7 @@ function fn_defaultUnit(partyID) {
         ws: { state: 'disconnected', detail: '', updatedAt: 0 },
         udp: { state: 'inactive', detail: 'Inactive', active: false, paused: false, ip: null, port: 0, level: 0, recoveryState: 'idle', statusNote: '', retryCount: 0, retryMax: 0, updatedAt: 0 },
         video: { state: 'idle', streaming: false, updatedAt: 0 },
+        flight: { flying: false, armed: false, mode: 0, updatedAt: 0 },
     };
 }
 
@@ -50,6 +51,7 @@ function fn_cloneStore() {
             ws: { ...unit.ws },
             udp: { ...unit.udp },
             video: { ...unit.video },
+            flight: { ...unit.flight },
         };
     });
 
@@ -565,6 +567,11 @@ export function fn_opsHealthSyncFromUnits() {
         unitState.video = fn_mergeTimed(unitState.video, {
             state: streaming === true ? 'streaming' : 'idle',
             streaming: streaming === true,
+        });
+        unitState.flight = fn_mergeTimed(unitState.flight, {
+            flying: unit.m_isFlying === true,
+            armed: unit.m_isArmed === true,
+            mode: Number(unit.m_flightMode || 0),
         });
         fn_applyGlobalWsToUnit(unitState);
     }

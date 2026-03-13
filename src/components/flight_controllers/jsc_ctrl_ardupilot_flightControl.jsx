@@ -1,4 +1,5 @@
 import React    from 'react';
+import { createPortal } from 'react-dom';
 import {js_globals} from '../../js/js_globals';
 import {EVENTS as js_event} from '../../js/js_eventList.js'
 import {js_eventEmitter} from '../../js/js_eventEmitter'
@@ -8,7 +9,7 @@ import * as js_helpers from '../../js/js_helpers'
 import {js_speak} from '../../js/js_speak'
 import { js_andruavAuth } from '../../js/js_andruav_auth.js';
 import ClssSafetyHoldButton from '../common/jsc_safety_hold_button.jsx';
-import {fn_auditAction, fn_do_modal_confirmation, fn_changeAltitude, fn_changeSpeed, fn_doYAW, gui_doYAW} from '../../js/js_main'
+import {fn_auditAction, fn_do_modal_confirmation, fn_changeSpeed, fn_doYAW, fn_convertToMeter, gui_doYAW} from '../../js/js_main'
 
 export class ClssCtrlArdupilotFlightController extends React.Component {
     constructor(props)
@@ -23,7 +24,15 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
 		        m_is_ready_to_arm: p_andruavUnit.m_is_ready_to_arm,
 		        m_isArmed: p_andruavUnit.m_isArmed,
 		        m_applyOnAllSameType: false,
-		        m_hasSameTypeUnits: hasSameTypeUnits
+		        m_hasSameTypeUnits: hasSameTypeUnits,
+                m_isClimbEditorOpen: false,
+                m_climbAltitudeInput: '',
+                m_climbAltitudeMin: 0,
+                m_climbAltitudeMax: 300,
+                m_climbAltitudeUnit: 'm',
+                m_climbEditorTop: 96,
+                m_climbEditorLeft: 96,
+                m_climbEditorMaxHeight: 420
 			};
     }
 
@@ -73,6 +82,14 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
             || (p_andruavUnit.m_flightMode !== v_andruavUnit.m_flightMode)
             || p_andruavUnit.m_applyOnAllSameType !== nextState.m_applyOnAllSameType
             || p_andruavUnit.m_hasSameTypeUnits !== nextState.m_hasSameTypeUnits
+            || p_andruavUnit.m_isClimbEditorOpen !== nextState.m_isClimbEditorOpen
+            || p_andruavUnit.m_climbAltitudeInput !== nextState.m_climbAltitudeInput
+            || p_andruavUnit.m_climbAltitudeMin !== nextState.m_climbAltitudeMin
+            || p_andruavUnit.m_climbAltitudeMax !== nextState.m_climbAltitudeMax
+            || p_andruavUnit.m_climbAltitudeUnit !== nextState.m_climbAltitudeUnit
+            || p_andruavUnit.m_climbEditorTop !== nextState.m_climbEditorTop
+            || p_andruavUnit.m_climbEditorLeft !== nextState.m_climbEditorLeft
+            || p_andruavUnit.m_climbEditorMaxHeight !== nextState.m_climbEditorMaxHeight
         );
 
         return update;
@@ -588,45 +605,20 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
     fn_doArm(v_andruavUnit) {
         if (this.fn_canArmDisarm(v_andruavUnit, 'ARM') !== true) return;
         if (v_andruavUnit !== null && v_andruavUnit !== undefined) {
-            const me = this;
-            fn_do_modal_confirmation("DANGEROUS: FORCE ADMING  " + v_andruavUnit.m_unitName + "   " + v_andruavUnit.m_VehicleType_TXT,
-                "OVERRIDE ARM .. Are You SURE?", function (p_approved) {
-                    if (p_approved === false) 
-                    {
-                        me.fn_applyAction(v_andruavUnit, (unit) => {
-                            const sent = js_globals.v_andruavFacade.API_do_Arm(unit, true, false);
-                            me.fn_auditArmAction(unit, sent === true ? 'warn' : 'error', `${sent === true ? 'ARM requested' : 'ARM send failed'} for ${unit.m_unitName}`);
-                        });
-                        return;
-                    }
-                    else
-                    {
-					    js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                        me.fn_applyAction(v_andruavUnit, (unit) => {
-                            const sent = js_globals.v_andruavFacade.API_do_Arm(unit, true, true);
-                            me.fn_auditArmAction(unit, sent === true ? 'warn' : 'error', `${sent === true ? 'FORCED ARM requested' : 'FORCED ARM send failed'} for ${unit.m_unitName}`);
-                        });
-                        return ;
-                    }
-                }, "FORCED-ARM", "bg-danger txt-theme-aware", "ARM");
+            this.fn_applyAction(v_andruavUnit, (unit) => {
+                const sent = js_globals.v_andruavFacade.API_do_Arm(unit, true, false);
+                this.fn_auditArmAction(unit, sent === true ? 'warn' : 'error', `${sent === true ? 'ARM requested' : 'ARM send failed'} for ${unit.m_unitName}`);
+            });
         }
     }
 
     fn_doDisarm(v_andruavUnit) {
         if (this.fn_canArmDisarm(v_andruavUnit, 'DISARM') !== true) return;
         if (v_andruavUnit !== null && v_andruavUnit !== undefined) {
-            const me = this;
-            fn_do_modal_confirmation("DANGEROUS: EMERGENCY DISARM  " + v_andruavUnit.m_unitName + "   " + v_andruavUnit.m_VehicleType_TXT,
-                "STOP all MOTORS and if vehicle in air will CRASH. Are You SURE?", function (p_approved) {
-                    if (p_approved === false) return;
-					js_speak.fn_speak('DANGEROUS EMERGENCY DISARM');
-                    me.fn_applyAction(v_andruavUnit, (unit) => {
-                            const sent = js_globals.v_andruavFacade.API_do_Arm(unit, false, true);
-                            me.fn_auditArmAction(unit, sent === true ? 'warn' : 'error', `${sent === true ? 'DISARM requested' : 'DISARM send failed'} for ${unit.m_unitName}`);
-                    });
-                }, "KILL-MOTORS", "bg-danger txt-theme-aware");
-
-
+            this.fn_applyAction(v_andruavUnit, (unit) => {
+                const sent = js_globals.v_andruavFacade.API_do_Arm(unit, false, false);
+                this.fn_auditArmAction(unit, sent === true ? 'warn' : 'error', `${sent === true ? 'DISARM requested' : 'DISARM send failed'} for ${unit.m_unitName}`);
+            });
         }
     }
 
@@ -776,17 +768,197 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
     }
 
     fn_changeAltitudeWrapper(v_andruavUnit) {
-        if (this.state.m_applyOnAllSameType === true) {
-            const me = this;
-            fn_changeAltitude(v_andruavUnit, function (p_baseUnit, p_altitudeCmd) {
-                me.fn_applyAction(v_andruavUnit, function (unit) {
-                    js_globals.v_andruavFacade.API_do_ChangeAltitude(unit, p_altitudeCmd);
-                });
-            });
+        if (v_andruavUnit === null || v_andruavUnit === undefined) return;
+        if (this.state.m_isClimbEditorOpen === true) {
+            this.setState({ m_isClimbEditorOpen: false });
+            return;
         }
-        else {
-            fn_changeAltitude(v_andruavUnit);
+
+        const relativeAltMeters = Number(v_andruavUnit?.m_Nav_Info?.p_Location?.alt_relative ?? 0);
+        const useMetric = js_globals.v_useMetricSystem !== false;
+        const displayUnit = useMetric ? 'm' : 'ft';
+        const displayValue = useMetric ? relativeAltMeters : (relativeAltMeters * js_helpers.CONST_METER_TO_FEET);
+        const safeDisplayValue = Number.isFinite(displayValue) ? displayValue : 0;
+        const defaultDisplayValue = this.fn_getDefaultClimbDisplayValue(displayUnit);
+        const maxByCurrent = safeDisplayValue + (useMetric ? 150 : 500);
+        const maxByDefault = defaultDisplayValue + (useMetric ? 150 : 500);
+        const defaultMax = useMetric ? 300 : 1000;
+        const displayMax = Math.max(defaultMax, Math.ceil(Math.max(maxByCurrent, maxByDefault) / 5) * 5);
+        const defaultInputValue = Math.min(displayMax, Math.max(0, defaultDisplayValue));
+
+        this.setState({
+            m_isClimbEditorOpen: true,
+            m_climbAltitudeInput: defaultInputValue.toFixed(useMetric ? 1 : 0),
+            m_climbAltitudeMin: 0,
+            m_climbAltitudeMax: displayMax,
+            m_climbAltitudeUnit: displayUnit
+        }, () => {
+            this.fn_repositionClimbEditor();
+        });
+    }
+
+    fn_repositionClimbEditor = () => {
+        if (this.state.m_isClimbEditorOpen !== true) return;
+
+        const mapHost = document.getElementById('div_map_view');
+        const rightPanel = document.getElementById('row_2');
+        const quickTools = mapHost ? mapHost.querySelector('.nb-map-quick-tools') : null;
+        if (mapHost === null || mapHost === undefined) return;
+
+        const mapRect = mapHost.getBoundingClientRect();
+        const rightRect = rightPanel ? rightPanel.getBoundingClientRect() : null;
+        const quickToolsRect = quickTools ? quickTools.getBoundingClientRect() : null;
+        const panelWidth = 208;
+        const edgeGap = 14;
+
+        if (mapRect.width < 80 || mapRect.height < 120) return;
+
+        const minLeft = mapRect.left + edgeGap;
+        const maxLeft = mapRect.right - panelWidth - edgeGap;
+        const boundedMaxLeft = Math.max(minLeft, maxLeft);
+        let nextLeft = maxLeft;
+        if (rightRect && Number.isFinite(rightRect.left)) {
+            const betweenLeft = rightRect.left - panelWidth - edgeGap;
+            if (betweenLeft > minLeft) {
+                nextLeft = betweenLeft;
+            }
         }
+        nextLeft = Math.min(boundedMaxLeft, Math.max(minLeft, nextLeft));
+
+        // Keep climb editor below map quick tools (center/focus buttons).
+        let nextTop = Math.max(70, mapRect.top + edgeGap);
+        if (quickToolsRect) {
+            nextTop = Math.max(nextTop, quickToolsRect.bottom + edgeGap);
+        }
+
+        const panelMinHeight = 220;
+        const maxTop = Math.max(mapRect.top + edgeGap, mapRect.bottom - edgeGap - panelMinHeight);
+        nextTop = Math.max(mapRect.top + edgeGap, Math.min(nextTop, maxTop));
+        const nextMaxHeight = Math.max(220, Math.round(mapRect.bottom - edgeGap - nextTop));
+        const roundedLeft = Math.round(nextLeft);
+        const roundedTop = Math.round(nextTop);
+
+        if (
+            this.state.m_climbEditorLeft === roundedLeft &&
+            this.state.m_climbEditorTop === roundedTop &&
+            this.state.m_climbEditorMaxHeight === nextMaxHeight
+        ) {
+            return;
+        }
+
+        this.setState({
+            m_climbEditorLeft: roundedLeft,
+            m_climbEditorTop: roundedTop,
+            m_climbEditorMaxHeight: nextMaxHeight
+        });
+    }
+
+    componentDidMount() {
+        window.addEventListener('resize', this.fn_repositionClimbEditor);
+        window.addEventListener('scroll', this.fn_repositionClimbEditor, true);
+    }
+
+    componentDidUpdate(prevProps, prevState) {
+        if (
+            this.state.m_isClimbEditorOpen === true &&
+            (
+                prevState.m_isClimbEditorOpen !== this.state.m_isClimbEditorOpen ||
+                prevState.m_climbAltitudeInput !== this.state.m_climbAltitudeInput ||
+                prevProps.v_andruavUnit?.getPartyID?.() !== this.props.v_andruavUnit?.getPartyID?.()
+            )
+        ) {
+            this.fn_repositionClimbEditor();
+        }
+    }
+
+    componentWillUnmount() {
+        window.removeEventListener('resize', this.fn_repositionClimbEditor);
+        window.removeEventListener('scroll', this.fn_repositionClimbEditor, true);
+    }
+
+    fn_clampClimbDisplayValue(value) {
+        const minVal = Number(this.state.m_climbAltitudeMin ?? 0);
+        const maxVal = Number(this.state.m_climbAltitudeMax ?? minVal);
+        return Math.min(maxVal, Math.max(minVal, value));
+    }
+
+    fn_formatClimbDisplayValue(value) {
+        const useMetric = this.state.m_climbAltitudeUnit === 'm';
+        return Number(value).toFixed(useMetric ? 1 : 0);
+    }
+
+    fn_adjustClimbAltitude(delta) {
+        const current = parseFloat(this.state.m_climbAltitudeInput);
+        if (Number.isFinite(current) !== true) return;
+        const nextValue = this.fn_clampClimbDisplayValue(current + delta);
+        this.setState({ m_climbAltitudeInput: this.fn_formatClimbDisplayValue(nextValue) });
+    }
+
+    fn_getDefaultClimbDisplayValue(displayUnit) {
+        const rawDefaultAltitude = Number(js_globals.CONST_DEFAULT_ALTITUDE);
+        if (Number.isFinite(rawDefaultAltitude) === true) {
+            return Math.max(0, rawDefaultAltitude);
+        }
+
+        if (displayUnit === 'ft') {
+            return Math.max(0, (100 * js_helpers.CONST_METER_TO_FEET));
+        }
+        return 100;
+    }
+
+    fn_getDefaultClimbAltitudeMeters() {
+        const displayUnit = this.state.m_climbAltitudeUnit || (js_globals.v_useMetricSystem !== false ? 'm' : 'ft');
+        const defaultDisplayValue = this.fn_getDefaultClimbDisplayValue(displayUnit);
+        const defaultMeters = fn_convertToMeter(defaultDisplayValue);
+        if (Number.isFinite(defaultMeters) !== true) return 0;
+        return Math.max(0, defaultMeters);
+    }
+
+    fn_applyDefaultClimbAltitude(v_andruavUnit) {
+        if (v_andruavUnit === null || v_andruavUnit === undefined) return;
+
+        const altitudeMeters = this.fn_getDefaultClimbAltitudeMeters();
+        const altitudeCommand = (v_andruavUnit.m_VehicleType === js_andruavUnit.VEHICLE_SUBMARINE)
+            ? -Math.abs(altitudeMeters)
+            : Math.max(0, altitudeMeters);
+
+        this.fn_applyAction(v_andruavUnit, (unit) => {
+            js_globals.v_andruavFacade.API_do_ChangeAltitude(unit, altitudeCommand);
+        });
+
+        const defaultDisplayValue = this.fn_getDefaultClimbDisplayValue(this.state.m_climbAltitudeUnit);
+        this.setState({
+            m_climbAltitudeInput: this.fn_formatClimbDisplayValue(this.fn_clampClimbDisplayValue(defaultDisplayValue)),
+            m_isClimbEditorOpen: false
+        });
+    }
+
+    fn_cancelClimbAltitude() {
+        this.setState({ m_isClimbEditorOpen: false });
+    }
+
+    fn_applyClimbAltitude(v_andruavUnit) {
+        if (v_andruavUnit === null || v_andruavUnit === undefined) return;
+
+        const parsedDisplayValue = parseFloat(this.state.m_climbAltitudeInput);
+        if (Number.isFinite(parsedDisplayValue) !== true) return;
+
+        const clampedDisplayValue = this.fn_clampClimbDisplayValue(parsedDisplayValue);
+        const altitudeMeters = (this.state.m_climbAltitudeUnit === 'm')
+            ? clampedDisplayValue
+            : (clampedDisplayValue * js_helpers.CONST_FEET_TO_METER);
+        const altitudeCommand = (v_andruavUnit.m_VehicleType === js_andruavUnit.VEHICLE_SUBMARINE)
+            ? -Math.abs(altitudeMeters)
+            : Math.max(0, altitudeMeters);
+
+        this.fn_applyAction(v_andruavUnit, (unit) => {
+            js_globals.v_andruavFacade.API_do_ChangeAltitude(unit, altitudeCommand);
+        });
+
+        this.setState({
+            m_climbAltitudeInput: this.fn_formatClimbDisplayValue(clampedDisplayValue),
+            m_isClimbEditorOpen: false
+        });
     }
 
     fn_changeSpeedWrapper(v_andruavUnit) {
@@ -850,6 +1022,126 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
                 &nbsp;{armButtonLabel}&nbsp;
             </ClssSafetyHoldButton>
         );
+        const defaultClimbDisplayValue = this.fn_getDefaultClimbDisplayValue(js_globals.v_useMetricSystem !== false ? 'm' : 'ft');
+        const defaultClimbLabel = (js_globals.v_useMetricSystem !== false)
+            ? `${defaultClimbDisplayValue.toFixed(0)} m`
+            : `${defaultClimbDisplayValue.toFixed(0)} ft`;
+        const climbButtonDisabled = typeof btn.btn_climb_class === 'string'
+            ? btn.btn_climb_class.includes('disabled')
+            : false;
+        const climbTitle = `Click to open altitude editor. Hold to set ${this.props.v_andruavUnit.m_unitName} altitude to default (${defaultClimbLabel}).`;
+        const climbControl = (
+            <ClssSafetyHoldButton
+                id='btn_climb'
+                className={'btn btn-sm flgtctrlbtn bi bi-arrow-bar-up ' + btn.btn_climb_class}
+                title={climbTitle}
+                disabled={climbButtonDisabled}
+                onTap={() => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}
+                onConfirm={() => this.fn_applyDefaultClimbAltitude(this.props.v_andruavUnit)}
+            >
+                &nbsp;{btn.btn_climb_text}&nbsp;
+            </ClssSafetyHoldButton>
+        );
+        const climbStepSet = this.state.m_climbAltitudeUnit === 'm'
+            ? [-20, -10, -5, 5, 10, 20]
+            : [-50, -25, -10, 10, 25, 50];
+        const decreaseSteps = climbStepSet.filter((stepVal) => stepVal < 0).sort((a, b) => a - b);
+        const increaseSteps = climbStepSet.filter((stepVal) => stepVal > 0).sort((a, b) => a - b);
+        const currentClimbValue = Number.isFinite(parseFloat(this.state.m_climbAltitudeInput))
+            ? parseFloat(this.state.m_climbAltitudeInput)
+            : this.state.m_climbAltitudeMin;
+        const climbEditor = this.state.m_isClimbEditorOpen === true ? (
+            <div
+                className='nb-climb-editor nb-climb-editor--floating'
+                style={{
+                    top: `${this.state.m_climbEditorTop}px`,
+                    left: `${this.state.m_climbEditorLeft}px`,
+                    maxHeight: `${this.state.m_climbEditorMaxHeight}px`
+                }}
+            >
+                <div className='nb-climb-editor__header'>
+                    <span className='nb-climb-editor__title'>Set Altitude (rel)</span>
+                    <button
+                        type='button'
+                        className='btn btn-sm btn-outline-theme-aware nb-climb-editor__close'
+                        onClick={() => this.fn_cancelClimbAltitude()}
+                    >
+                        <i className='bi bi-x-lg'></i>
+                    </button>
+                </div>
+                <div className='nb-climb-editor__input-row'>
+                    <input
+                        type='number'
+                        className='form-control form-control-sm nb-climb-editor__input'
+                        min={this.state.m_climbAltitudeMin}
+                        max={this.state.m_climbAltitudeMax}
+                        step={this.state.m_climbAltitudeUnit === 'm' ? '0.5' : '1'}
+                        value={this.state.m_climbAltitudeInput}
+                        onChange={(e) => this.setState({ m_climbAltitudeInput: e.target.value })}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.preventDefault();
+                                this.fn_applyClimbAltitude(this.props.v_andruavUnit);
+                            }
+                        }}
+                    />
+                    <span className='nb-climb-editor__unit'>{this.state.m_climbAltitudeUnit}</span>
+                </div>
+                <div className='nb-climb-editor__slider-wrap'>
+                    <span className='nb-climb-editor__scale nb-climb-editor__scale--max'>{this.fn_formatClimbDisplayValue(this.state.m_climbAltitudeMax)}</span>
+                    <input
+                        type='range'
+                        className='nb-climb-editor__slider'
+                        min={this.state.m_climbAltitudeMin}
+                        max={this.state.m_climbAltitudeMax}
+                        step={this.state.m_climbAltitudeUnit === 'm' ? '0.5' : '1'}
+                        value={currentClimbValue}
+                        onChange={(e) => this.setState({ m_climbAltitudeInput: this.fn_formatClimbDisplayValue(parseFloat(e.target.value)) })}
+                    />
+                    <span className='nb-climb-editor__scale nb-climb-editor__scale--min'>{this.fn_formatClimbDisplayValue(this.state.m_climbAltitudeMin)}</span>
+                </div>
+                <div className='nb-climb-editor__chips-groups'>
+                    <div className='nb-climb-editor__chips-group'>
+                        <div className='nb-climb-editor__chips-title'>Decrease</div>
+                        <div className='nb-climb-editor__chips'>
+                            {decreaseSteps.map((stepVal) => (
+                                <button
+                                    key={`climb_step_${stepVal}`}
+                                    type='button'
+                                    className='btn btn-sm btn-outline-theme-aware nb-climb-editor__chip nb-climb-editor__chip--decrease'
+                                    onClick={() => this.fn_adjustClimbAltitude(stepVal)}
+                                >
+                                    {stepVal}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className='nb-climb-editor__chips-group'>
+                        <div className='nb-climb-editor__chips-title'>Increase</div>
+                        <div className='nb-climb-editor__chips'>
+                            {increaseSteps.map((stepVal) => (
+                                <button
+                                    key={`climb_step_${stepVal}`}
+                                    type='button'
+                                    className='btn btn-sm btn-outline-theme-aware nb-climb-editor__chip nb-climb-editor__chip--increase'
+                                    onClick={() => this.fn_adjustClimbAltitude(stepVal)}
+                                >
+                                    {`+${stepVal}`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                <div className='nb-climb-editor__actions'>
+                    <button type='button' className='btn btn-sm btn-outline-theme-aware' onClick={() => this.fn_cancelClimbAltitude()}>Cancel</button>
+                    <button type='button' className='btn btn-sm btn-primary' onClick={() => this.fn_applyClimbAltitude(this.props.v_andruavUnit)}>Set Altitude</button>
+                </div>
+            </div>
+        ) : null;
+        const climbEditorHost = (typeof document !== 'undefined') ? document.body : null;
+        const climbEditorPortal = (climbEditor !== null && climbEditorHost !== null)
+            ? createPortal(climbEditor, climbEditorHost)
+            : null;
         let ctrl=[];
         const hasSameTypeUnits = this.state.m_hasSameTypeUnits;
         
@@ -860,7 +1152,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
     {
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap '>
                     {armControl}
-                    <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ () => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
+                    {climbControl}
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ () => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ () => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
                     <button id='btn_surface' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_surface_class } onClick={ () => this.fn_doSurface(this.props.v_andruavUnit)}>&nbsp;Surface&nbsp;</button>
@@ -898,7 +1190,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
                 {
                 ctrl.push(<div key={this.props.id+"rc1"} id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap'>
                     {armControl}
-                    <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ () => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
+                    {climbControl}
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ () => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ () => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
                     <button id='btn_surface' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_surface_class } onClick={ () => this.fn_doSurface(this.props.v_andruavUnit)}>&nbsp;Surface&nbsp;</button>
@@ -940,7 +1232,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
                 {
                 ctrl.push(<div key={this.props.id+"rc1"}  id={this.props.id+"rc1"}  className= 'col-12  al_l ctrldiv'><div className='btn-group w-100 d-flex flex-wrap'>
                     {armControl}
-                    <button id='btn_climb' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-up '  + btn.btn_climb_class } onClick={ () => this.fn_changeAltitudeWrapper(this.props.v_andruavUnit)}>&nbsp;{btn.btn_climb_text}&nbsp;</button>
+                    {climbControl}
                     <button id='btn_takeoff' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_takeoff_class } onClick={ () => this.fn_doTakeOffPlane(this.props.v_andruavUnit)}>&nbsp;TakeOff&nbsp;</button>
                     <button id='btn_land' type='button' className={'btn btn-sm  flgtctrlbtn bi bi-arrow-bar-down ' + btn.btn_land_class } onClick={ () => this.fn_doLand(this.props.v_andruavUnit)}>&nbsp;Land&nbsp;</button>
                     <button id='btn_surface' type='button' className={'btn btn-sm  flgtctrlbtn ' + btn.btn_surface_class } onClick={ () => this.fn_doSurface(this.props.v_andruavUnit)}>&nbsp;Surface&nbsp;</button>
@@ -972,6 +1264,7 @@ export class ClssCtrlArdupilotFlightController extends React.Component {
 
         return (<div key={this.props.id+"rc"}   id={this.props.id+"rc"} >
             {ctrl}
+            {climbEditorPortal}
             {hasSameTypeUnits && (
                 <div className='form-check mt-1'>
                     <input

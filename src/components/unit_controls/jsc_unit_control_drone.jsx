@@ -1,6 +1,7 @@
 import React from 'react';
 
 import * as js_siteConfig from '../../js/js_siteConfig.js'
+import { js_localStorage } from '../../js/js_localStorage.js';
 
 import { js_globals } from '../../js/js_globals.js';
 import { EVENTS as js_event } from '../../js/js_eventList.js'
@@ -34,6 +35,7 @@ import ClssCtrlUnitMainBar from './jsc_ctrl_unit_main_bar.jsx'
 import ClssCtrlUnitPlanningBar from './jsc_ctrl_unit_planning_bar.jsx'
 import ClssCtrlObjectTracker from '../gadgets/jsc_ctrl_tracker_button.jsx'
 import ClssCtrlObjectTrackerAIList from '../gadgets/jsc_ctrl_tracker_ai_list.jsx'
+import ClssCtrlSWARM from '../gadgets/jsc_ctrl_swarm.jsx';
 
 /**
  * This class is full control of Drone.
@@ -56,6 +58,8 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
             tab_module: this.props.tab_module,
             tab_collapsed: this.props.tab_collapsed,
             ui_sections: this.fn_getSavedSections(),
+            mission_action_busy: false,
+            mission_action_label: '',
 
             m_update: 0
         };
@@ -63,9 +67,42 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
         
         this.props.p_unit.m_gui.speed_link = false;
         this.key = Math.random().toString();
+        this.uiActionCooldownByKey = Object.create(null);
+        this.missionActionUnlockTimer = null;
 
         js_eventEmitter.fn_subscribe (js_event.EE_OldModule,this,this.fn_update);
         
+    }
+
+    fn_setMissionActionBusy(isBusy, actionLabel = '') {
+        if (this.missionActionUnlockTimer) {
+            clearTimeout(this.missionActionUnlockTimer);
+            this.missionActionUnlockTimer = null;
+        }
+
+        this.setState({
+            mission_action_busy: isBusy === true,
+            mission_action_label: isBusy === true ? actionLabel : ''
+        });
+    }
+
+    fn_unlockMissionAction(me, data) {
+        if (!data || !data.unit || !data.unit.getPartyID) return;
+        if (data.unit.getPartyID() !== me.props.p_unit.getPartyID()) return;
+        if (me.state.mission_action_busy !== true) return;
+
+        me.fn_setMissionActionBusy(false);
+    }
+
+    fn_canRunUiAction(actionKey, cooldownMs) {
+        const now = Date.now();
+        const until = this.uiActionCooldownByKey[actionKey] || 0;
+        if (until > now) {
+            return false;
+        }
+
+        this.uiActionCooldownByKey[actionKey] = now + cooldownMs;
+        return true;
     }
 
     fn_getSavedSections() {
@@ -194,13 +231,31 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
 
     fn_requestWayPointsWithAudit(p_andruavUnit) {
         if (this.fn_hasPermission('mission_read', p_andruavUnit, 'R-WP') !== true) return;
-        fn_requestWayPoints(p_andruavUnit, true);
+        if (this.state.mission_action_busy === true) return;
+        const partyID = p_andruavUnit?.getPartyID?.() || 'unit';
+        if (this.fn_canRunUiAction(`rwp:${partyID}`, 2500) !== true) return;
+        this.fn_setMissionActionBusy(true, 'read');
+        this.missionActionUnlockTimer = setTimeout(() => this.fn_setMissionActionBusy(false), 12000);
+        const sent = fn_requestWayPoints(p_andruavUnit, true);
+        if (sent === false) {
+            this.fn_setMissionActionBusy(false);
+            return;
+        }
         fn_auditAction('info', p_andruavUnit?.getPartyID?.() || '', `R-WP requested for ${p_andruavUnit?.m_unitName || 'unit'}`);
     }
 
     fn_clearWayPointsFromMapWithAudit(p_andruavUnit) {
         if (this.fn_hasPermission('mission_write', p_andruavUnit, 'C-WP') !== true) return;
-        fn_clearWayPointsFromMap(p_andruavUnit);
+        if (this.state.mission_action_busy === true) return;
+        const partyID = p_andruavUnit?.getPartyID?.() || 'unit';
+        if (this.fn_canRunUiAction(`cwp:${partyID}`, 700) !== true) return;
+        this.fn_setMissionActionBusy(true, 'clear');
+        const cleared = fn_clearWayPointsFromMap(p_andruavUnit);
+        if (cleared !== true) {
+            this.fn_setMissionActionBusy(false);
+            return;
+        }
+        this.missionActionUnlockTimer = setTimeout(() => this.fn_setMissionActionBusy(false), 250);
         fn_auditAction('warn', p_andruavUnit?.getPartyID?.() || '', `C-WP cleared map mission for ${p_andruavUnit?.m_unitName || 'unit'}`);
     }
 
@@ -344,6 +399,18 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
             </li>);
         }
 
+        const isSwarmTabVisible = (js_siteConfig.CONST_FEATURE.DISABLE_SWARM !== true) && (js_localStorage.fn_getAdvancedOptionsEnabled() === true);
+        if (isSwarmTabVisible === true) {
+            container_tabs.push(<li key={v_andruavUnit.getPartyID() + 'li_swarm'} className="nav-item">
+                <a
+                    className="nav-link user-select-none bi bi-diagram-3 txt-theme-aware"
+                    data-bs-toggle="tab"
+                    href={"#swarm" + v_andruavUnit.getPartyID()}
+                    title='Swarm'
+                ></a>
+            </li>);
+        }
+
         if (this.state.tab_log === true) {
             container_tabs.push(<li key={v_andruavUnit.getPartyID() + 'li2'} className="nav-item">
                 <a className="nav-link user-select-none bi bi-list-columns txt-theme-aware " data-bs-toggle="tab" href={"#log" + v_andruavUnit.getPartyID()} title='Log'></a>
@@ -421,6 +488,15 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
                 {this.renderMainSections(v_andruavUnit)}
             </div>);
         }
+        if (isSwarmTabVisible === true) {
+            container_controls.push(
+                <div key={v_andruavUnit.getPartyID() + 'myTabClssSWARM'} className="tab-pane fade pt-2" id={"swarm" + v_andruavUnit.getPartyID()}>
+                    <div className="nb-swarm-tab">
+                        <ClssCtrlSWARM key={'cswarm_tab_' + v_andruavUnit.getPartyID()} className="row padding_zero" p_unit={v_andruavUnit} />
+                    </div>
+                </div>
+            );
+        }
         if (this.state.tab_log === true) {
             container_controls.push(<div key={v_andruavUnit.getPartyID() + 'myTabClssMESSAGE_LOG'} className="tab-pane fade pt-2" id={"log" + v_andruavUnit.getPartyID()}>
                 <ClssCtrlUnitLog p_unit={v_andruavUnit} />
@@ -480,10 +556,16 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
 
     childcomponentWillMount() {
         js_eventEmitter.fn_subscribe(js_event.EE_requestGamePad, this, this.fn_requestGamePad);
+        js_eventEmitter.fn_subscribe(js_event.EE_msgFromUnit_WayPoints, this, this.fn_unlockMissionAction);
     }
 
     childcomponentWillUnmount() {
         js_eventEmitter.fn_unsubscribe(js_event.EE_requestGamePad, this);
+        js_eventEmitter.fn_unsubscribe(js_event.EE_msgFromUnit_WayPoints, this);
+        if (this.missionActionUnlockTimer) {
+            clearTimeout(this.missionActionUnlockTimer);
+            this.missionActionUnlockTimer = null;
+        }
     }
 
 
@@ -522,6 +604,7 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
         const canMissionWrite = js_andruavAuth.fn_canExecuteAction('mission_write') === true;
         const canCriticalAction = js_andruavAuth.fn_canExecuteAction('critical_action') === true;
         const role = js_andruavAuth.fn_getRole();
+        const missionActionBusy = this.state.mission_action_busy === true;
         if (!js_andruavAuth.fn_do_canControlWP()) {   // no permission
             cls_ctrl_wp = ' hidden disabled ';
         }
@@ -549,8 +632,8 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
                 type='button'
                 className={'btn btn-sm flgtctrlbtn ' + btn.btn_load_wp_class}
                 onClick={() => this.fn_requestWayPointsWithAudit(p_andruavUnit)}
-                title={canMissionRead === true ? `Read mission from ${p_andruavUnit.m_unitName}` : `Role ${role} cannot read mission`}
-                disabled={canMissionRead !== true}
+                title={canMissionRead === true ? (missionActionBusy ? 'Mission action in progress...' : `Read mission from ${p_andruavUnit.m_unitName}`) : `Role ${role} cannot read mission`}
+                disabled={canMissionRead !== true || missionActionBusy}
             >&nbsp;R-WP</button>
             <button
                 id='btn_clearwp'
@@ -558,8 +641,8 @@ export class ClssAndruavUnitDrone extends ClssAndruavUnitBase {
                 type='button'
                 className={'btn btn-sm flgtctrlbtn ' + cls_ctrl_wp + btn.btn_clear_wp_class}
                 onClick={() => this.fn_clearWayPointsFromMapWithAudit(p_andruavUnit)}
-                title={canMissionWrite === true ? `Clear map mission of ${p_andruavUnit.m_unitName}` : `Role ${role} cannot clear mission`}
-                disabled={canMissionWrite !== true}
+                title={canMissionWrite === true ? (missionActionBusy ? 'Mission action in progress...' : `Clear map mission of ${p_andruavUnit.m_unitName}`) : `Role ${role} cannot clear mission`}
+                disabled={canMissionWrite !== true || missionActionBusy}
             >&nbsp;C-WP</button>
             <button
                 id='btn_webRX'

@@ -288,6 +288,14 @@ class CLocalStorage {
 
         return v === 'true';
     }
+
+    fn_setWebSocketBridgeEnabled(value) {
+        this._setValue(js_globals.LS_WEBSOCKET_BRIDGE_ENABLED, value === true ? 'true' : 'false');
+    }
+
+    fn_getWebSocketBridgeEnabled() {
+        return this._getValue(js_globals.LS_WEBSOCKET_BRIDGE_ENABLED, 'true') === 'true';
+    }
 }
 
 export const js_localStorage = CLocalStorage.getInstance();

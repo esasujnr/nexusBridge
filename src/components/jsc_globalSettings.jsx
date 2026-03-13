@@ -259,7 +259,7 @@ class ClssPreferences extends React.Component {
     this.m_advancedRef.current.checked = js_localStorage.fn_getAdvancedOptionsEnabled();
     this.m_gcsDisplayRef.current.checked = js_localStorage.fn_getGCSDisplayEnabled();
     this.m_gcsShowMeRef.current.checked = js_localStorage.fn_getGCSShowMe();
-    this.m_ws2wsRef.current.checked = false;
+    this.m_ws2wsRef.current.checked = js_localStorage.fn_getWebSocketBridgeEnabled();
   }
 
   componentWillUnmount() { }
@@ -297,6 +297,7 @@ class ClssPreferences extends React.Component {
   fn_enableWS2WS(e)
   {
     const enabled = e.currentTarget.checked;
+    js_localStorage.fn_setWebSocketBridgeEnabled(enabled);
     if (enabled === true)
     {
       js_websocket_bridge.fn_init();
@@ -432,8 +433,8 @@ class ClssPreferences extends React.Component {
             ref={this.m_advancedRef}
             onClick={(e) => this.fn_enableAdvanced(e)}
           />
-          <label htmlFor="check_advanced" className="col-sm-4 col-form-label al_r">
-            Mavlink3D
+          <label htmlFor="enable_ws2ws_socket" className="col-sm-4 col-form-label al_r">
+            Telemetry Bridge
           </label>
           <input
             className="form-check-input col-sm-8"

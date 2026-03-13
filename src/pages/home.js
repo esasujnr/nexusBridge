@@ -28,11 +28,11 @@ import ClssServoControl from '../components/dialogs/jsc_servoDialogControl.jsx';
 import ClssAndruavUnitListArray from '../components/unit_controls/jsc_unitControlArrayView.jsx';
 import ClssUnitParametersList from '../components/dialogs/jsc_unitParametersList.jsx';
 import ClssConfigGenerator from '../components/jsc_config_generator.jsx'
-import ClssOpsHealthPanel from '../components/gadgets/jsc_ops_health_panel.jsx';
-import ClssOpsUIToolsPanel from '../components/gadgets/jsc_ops_ui_tools_panel.jsx';
+import ClssFloatingOpsDock from '../components/gadgets/jsc_floating_ops_dock.jsx';
 import { ClssCVideoControl } from '../components/video/jsc_videoDisplayComponent.jsx';
-import { fn_gotoUnit_byPartyID, fn_on_ready, fn_showMap, fn_showVideoMainTab } from '../js/js_main';
+import { fn_on_ready, fn_showMap, fn_showVideoMainTab } from '../js/js_main';
 import { js_leafletmap } from '../js/js_leafletmap.js';
+import { fn_setUIActiveUnit } from '../js/js_ui_state.js';
 
 const Home = () => {
   const { t } = useTranslation('home'); // Use home namespace
@@ -111,17 +111,34 @@ const Home = () => {
     const activeUnit = activePartyID
       ? js_globals?.m_andruavUnitList?.fn_getUnit?.(activePartyID)
       : null;
-    const fallbackUnit = units.find((unit) => isEligibleUnit(unit));
+    const hasValidLocation = (unit) => {
+      const lat = Number(unit?.m_Nav_Info?.p_Location?.lat);
+      const lng = Number(unit?.m_Nav_Info?.p_Location?.lng);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    };
+    const fallbackUnit = units.find((unit) => isEligibleUnit(unit) && hasValidLocation(unit));
     const targetUnit = isEligibleUnit(activeUnit) ? activeUnit : fallbackUnit;
     if (!targetUnit) return;
 
-    fn_gotoUnit_byPartyID(targetUnit.getPartyID());
+    const targetLat = Number(targetUnit?.m_Nav_Info?.p_Location?.lat);
+    const targetLng = Number(targetUnit?.m_Nav_Info?.p_Location?.lng);
+    if (!Number.isFinite(targetLat) || !Number.isFinite(targetLng)) return;
+
+    fn_setUIActiveUnit(targetUnit.getPartyID());
+    if (js_globals?.v_andruavFacade?.API_do_GetHomeLocation) {
+      js_globals.v_andruavFacade.API_do_GetHomeLocation(targetUnit);
+    }
 
     const map = js_leafletmap?.m_Map;
-    if (!map || typeof map.getContainer !== 'function' || typeof map.containerPointToLatLng !== 'function') return;
+    if (!map
+      || typeof map.flyTo !== 'function'
+      || typeof map.project !== 'function'
+      || typeof map.unproject !== 'function'
+      || typeof map.distance !== 'function') return;
 
     const scaleStepsMeters = [5, 10, 25, 50, 100, 150, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000];
     const sampleWidthPx = 100;
+    const targetScaleMeters = 100;
 
     const getSnappedScale = (rawMeters) => {
       if (!Number.isFinite(rawMeters) || rawMeters <= 0) return NaN;
@@ -133,52 +150,37 @@ const Home = () => {
       return scaleStepsMeters[scaleStepsMeters.length - 1];
     };
 
-    const measureSnappedScaleAtCurrentZoom = () => {
-      const mapContainer = map.getContainer();
-      if (!mapContainer) return NaN;
-      const mapRect = mapContainer.getBoundingClientRect();
-      const yPixel = Math.max(0, Math.min(mapRect.height || 0, Math.round((mapRect.height || 0) / 2)));
-      const leftCoord = map.containerPointToLatLng([0, yPixel]);
-      const rightCoord = map.containerPointToLatLng([sampleWidthPx, yPixel]);
-      return getSnappedScale(Math.round(leftCoord.distanceTo(rightCoord)));
+    const measureSnappedScaleAtZoom = (zoom) => {
+      const projected = map.project([targetLat, targetLng], zoom);
+      if (!projected || !Number.isFinite(projected.x) || !Number.isFinite(projected.y)) return NaN;
+      const rightCoord = map.unproject([projected.x + sampleWidthPx, projected.y], zoom);
+      if (!rightCoord) return NaN;
+      const rawMeters = map.distance([targetLat, targetLng], rightCoord);
+      return getSnappedScale(Math.round(rawMeters));
     };
 
-    const enforceMinimumScaleMeters = () => {
-      const maxZoom = Number.isFinite(map.getMaxZoom?.()) ? map.getMaxZoom() : 22;
-      const startZoom = map.getZoom();
-      const startScale = measureSnappedScaleAtCurrentZoom();
-      if (!Number.isFinite(startScale) || startScale <= 100) return;
+    const minZoom = Number.isFinite(map.getMinZoom?.()) ? map.getMinZoom() : 1;
+    const maxZoom = Number.isFinite(map.getMaxZoom?.()) ? map.getMaxZoom() : 22;
+    let bestZoom = Number.isFinite(map.getZoom?.()) ? map.getZoom() : minZoom;
+    let bestScale = measureSnappedScaleAtZoom(bestZoom);
+    let bestDelta = Number.isFinite(bestScale) ? Math.abs(bestScale - targetScaleMeters) : Number.POSITIVE_INFINITY;
 
-      let bestZoom = startZoom;
-      let bestScale = startScale;
-      let bestDelta = Math.abs(startScale - 100);
-
-      for (let zoom = startZoom + 1; zoom <= maxZoom; zoom += 1) {
-        map.setZoom(zoom, { animate: false });
-        const snapped = measureSnappedScaleAtCurrentZoom();
-        if (!Number.isFinite(snapped)) continue;
-
-        const delta = Math.abs(snapped - 100);
-        if (delta < bestDelta || (delta === bestDelta && snapped === 100)) {
-          bestZoom = zoom;
-          bestScale = snapped;
-          bestDelta = delta;
-        }
-        if (snapped === 100) break;
+    for (let zoom = minZoom; zoom <= maxZoom; zoom += 1) {
+      const snapped = measureSnappedScaleAtZoom(zoom);
+      if (!Number.isFinite(snapped)) continue;
+      const delta = Math.abs(snapped - targetScaleMeters);
+      if (delta < bestDelta || (delta === bestDelta && snapped === targetScaleMeters)) {
+        bestZoom = zoom;
+        bestScale = snapped;
+        bestDelta = delta;
       }
-
-      if (map.getZoom() !== bestZoom) {
-        map.setZoom(bestZoom, { animate: false });
-      }
-      if (bestScale !== 100 && map.getZoom() === startZoom) {
-        map.setZoom(bestZoom, { animate: false });
-      }
-    };
-
-    if (typeof map.once === 'function') {
-      map.once('moveend', enforceMinimumScaleMeters);
+      if (snapped === targetScaleMeters) break;
     }
-    window.setTimeout(enforceMinimumScaleMeters, 350);
+
+    if (typeof map.stop === 'function') {
+      map.stop();
+    }
+    map.setView([targetLat, targetLng], bestZoom, { animate: false });
   }, []);
 
   useEffect(() => {
@@ -348,8 +350,6 @@ const Home = () => {
                 )}
               </button>
             </div>
-            <ClssOpsHealthPanel />
-            <ClssOpsUIToolsPanel />
             <div id="andruavUnits_in" className="settings-panel-body" style={{ display: isSettingsOpen ? 'block' : 'none' }}>
               <ClssGlobalSettings />
               <div id="andruavUnitGlobals"></div>
@@ -370,6 +370,7 @@ const Home = () => {
           </div>
         </div>
       </div>
+      <ClssFloatingOpsDock />
 
       <div className="modal fade" id="altitude_modal">
         <div className="modal-dialog">
