@@ -637,6 +637,7 @@ class C_Telemetry {
     this.m_udpProxy_paused = false;
     this.m_udpProxy_recovery_state = 'idle';
     this.m_udpProxy_status_note = '';
+    this.m_udpProxy_last_info_at = 0;
   }
 
   fn_getManualTXBlockedSubAction() {

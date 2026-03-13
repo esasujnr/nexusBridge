@@ -17,13 +17,6 @@ import {
   fn_setUIFocusPartyID,
   fn_uiStateSnapshot,
 } from '../../js/js_ui_state.js';
-import {
-  fn_uiAlertsAdd,
-  fn_uiAlertsAcknowledge,
-  fn_uiAlertsAcknowledgeAll,
-  fn_uiAlertsClear,
-  fn_uiAlertsSnapshot,
-} from '../../js/js_ui_alerts.js';
 import ClssSafetyHoldButton from '../common/jsc_safety_hold_button.jsx';
 
 const LAYOUT_PRESET_KEY = 'nb-layout-preset';
@@ -59,7 +52,6 @@ function fn_loadSectionState() {
     layout: true,
     critical: true,
     mission: true,
-    alerts: false,
   };
   if (typeof window === 'undefined' || !window.localStorage) return defaults;
   try {
@@ -70,7 +62,6 @@ function fn_loadSectionState() {
       layout: parsed?.layout !== false,
       critical: parsed?.critical !== false,
       mission: parsed?.mission !== false,
-      alerts: parsed?.alerts === true,
     };
   } catch {
     return defaults;
@@ -86,28 +77,12 @@ function fn_saveSectionState(state) {
   }
 }
 
-function fn_formatTime(ts) {
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour12: false });
-  } catch {
-    return '--:--:--';
-  }
-}
-
-function fn_alertClass(level, ack) {
-  const base = ack === true ? 'nb-alert-row is-ack' : 'nb-alert-row';
-  if (level === 'error') return `${base} is-error`;
-  if (level === 'warn') return `${base} is-warn`;
-  return `${base} is-info`;
-}
-
 function fn_getOnlineUnits() {
   return fn_getOnlineDroneUnits().filter((unit) => unit && typeof unit.getPartyID === 'function');
 }
 
 function ClssOpsUIToolsPanel() {
   const [uiSnapshot, setUiSnapshot] = useState(() => fn_uiStateSnapshot());
-  const [alertsSnapshot, setAlertsSnapshot] = useState(() => fn_uiAlertsSnapshot());
   const [sectionState, setSectionState] = useState(fn_loadSectionState);
   const [layoutPreset, setLayoutPreset] = useState(fn_loadLayoutPreset);
   const [actionScope, setActionScope] = useState('focused');
@@ -120,9 +95,6 @@ function ClssOpsUIToolsPanel() {
       setUiSnapshot(snapshot || fn_uiStateSnapshot());
       refresh();
     };
-    const onAlertChanged = (me, snapshot) => {
-      setAlertsSnapshot(snapshot || fn_uiAlertsSnapshot());
-    };
     const onLayoutChanged = (me, payload) => {
       const nextPreset = payload?.preset;
       if (!LAYOUT_PRESETS.some((preset) => preset.id === nextPreset)) return;
@@ -132,7 +104,6 @@ function ClssOpsUIToolsPanel() {
 
     js_eventEmitter.fn_subscribe(js_event.EE_uiFocusChanged, listener, onUiStateChanged);
     js_eventEmitter.fn_subscribe(js_event.EE_uiMissionLayerChanged, listener, onUiStateChanged);
-    js_eventEmitter.fn_subscribe(js_event.EE_uiAlertEvent, listener, onAlertChanged);
     js_eventEmitter.fn_subscribe(js_event.EE_unitAdded, listener, refresh);
     js_eventEmitter.fn_subscribe(js_event.EE_unitOnlineChanged, listener, refresh);
     js_eventEmitter.fn_subscribe(js_event.EE_unitUpdated, listener, refresh);
@@ -140,11 +111,9 @@ function ClssOpsUIToolsPanel() {
     js_eventEmitter.fn_subscribe(js_event.EE_uiLayoutPresetApplied, listener, onLayoutChanged);
 
     setUiSnapshot(fn_uiStateSnapshot());
-    setAlertsSnapshot(fn_uiAlertsSnapshot());
     return () => {
       js_eventEmitter.fn_unsubscribe(js_event.EE_uiFocusChanged, listener);
       js_eventEmitter.fn_unsubscribe(js_event.EE_uiMissionLayerChanged, listener);
-      js_eventEmitter.fn_unsubscribe(js_event.EE_uiAlertEvent, listener);
       js_eventEmitter.fn_unsubscribe(js_event.EE_unitAdded, listener);
       js_eventEmitter.fn_unsubscribe(js_event.EE_unitOnlineChanged, listener);
       js_eventEmitter.fn_unsubscribe(js_event.EE_unitUpdated, listener);
@@ -158,10 +127,6 @@ function ClssOpsUIToolsPanel() {
   const focusPartyID = uiSnapshot.focusPartyID
     || uiSnapshot.activePartyID
     || (onlineUnits[0] ? onlineUnits[0].getPartyID() : '');
-  const alerts = useMemo(() => {
-    const rows = Array.isArray(alertsSnapshot?.events) ? alertsSnapshot.events : [];
-    return rows.slice(0, 20);
-  }, [alertsSnapshot]);
 
   const targetUnits = useMemo(() => {
     if (actionScope === 'all') return onlineUnits;
@@ -233,11 +198,6 @@ function ClssOpsUIToolsPanel() {
     const countText = `${targetUnits.length} unit${targetUnits.length === 1 ? '' : 's'}`;
     const msg = `${label} command sent to ${countText} (${scopeText})`;
     fn_opsHealthAddEvent({
-      source: 'ops',
-      level: (actionKey === 'land' || actionKey === 'arm_toggle') ? 'warn' : 'info',
-      message: msg,
-    });
-    fn_uiAlertsAdd({
       source: 'ops',
       level: (actionKey === 'land' || actionKey === 'arm_toggle') ? 'warn' : 'info',
       message: msg,
@@ -403,39 +363,6 @@ function ClssOpsUIToolsPanel() {
         </div>
       ))}
 
-      {fn_renderSection('alerts', 'Alert Center', alerts.length > 0 ? `${alerts.length}` : null, (
-        <div className="nb-alert-center">
-          <div className="nb-alert-center__actions">
-            <button type="button" className="btn btn-sm nb-ui-tools-btn" onClick={() => fn_uiAlertsAcknowledgeAll()}>
-              Ack All
-            </button>
-            <button type="button" className="btn btn-sm nb-ui-tools-btn" onClick={() => fn_uiAlertsClear(true)}>
-              Clear Acked
-            </button>
-            <button type="button" className="btn btn-sm nb-ui-tools-btn" onClick={() => fn_uiAlertsClear(false)}>
-              Clear
-            </button>
-          </div>
-          <div className="nb-alert-center__list">
-            {alerts.length === 0 && <div className="nb-ui-tools-empty">No recent alerts</div>}
-            {alerts.map((alert) => (
-              <button
-                key={alert.id}
-                type="button"
-                className={fn_alertClass(alert.level, alert.ack)}
-                onClick={() => fn_uiAlertsAcknowledge(alert.id, alert.ack !== true)}
-              >
-                <span className="nb-alert-row__time">{fn_formatTime(alert.ts)}</span>
-                <span className="nb-alert-row__source">{alert.source}</span>
-                <span className="nb-alert-row__message">
-                  {alert.partyID ? `[${alert.partyID}] ` : ''}
-                  {alert.message}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

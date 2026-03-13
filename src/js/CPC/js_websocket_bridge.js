@@ -781,7 +781,7 @@ class CWebSocketBridge {
         const requiresRefresh = (
             telemetry.m_udpProxy_active !== true
             || telemetry.m_udpProxy_paused === true
-            || Number(telemetry.m_telemetry_level || 0) < 3
+            || Number(telemetry.m_telemetry_level || 0) < 2
         );
 
         if (!requiresRefresh && (nowMs - lastConfigAt) < 12000)
@@ -796,12 +796,18 @@ class CWebSocketBridge {
 
         try
         {
+            const currentRate = Number.parseInt(telemetry.m_telemetry_level || 0, 10);
+            const targetRate = (
+                Number.isFinite(currentRate) && currentRate > 0
+                    ? Math.min(3, currentRate)
+                    : 2
+            );
             if (telemetry.m_udpProxy_active !== true)
             {
                 js_andruav_facade.AndruavClientFacade.API_startTelemetry(unit);
             }
             js_andruav_facade.AndruavClientFacade.API_resumeTelemetry(unit);
-            js_andruav_facade.AndruavClientFacade.API_adjustTelemetryDataRate(unit, 3);
+            js_andruav_facade.AndruavClientFacade.API_adjustTelemetryDataRate(unit, targetRate);
             js_andruav_facade.AndruavClientFacade.API_requestUdpProxyStatus(unit);
         }
         catch

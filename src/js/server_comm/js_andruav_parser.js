@@ -337,6 +337,7 @@ class CAndruavClientParser {
                 p_unit.m_Telemetry.m_udpProxy_port = p_jmsg.p;
                 p_unit.m_Telemetry.m_telemetry_level = p_jmsg.o;
                 p_unit.m_Telemetry.m_udpProxy_active = p_jmsg.en;
+                p_unit.m_Telemetry.m_udpProxy_last_info_at = Date.now();
                 if (p_jmsg.en === true) {
                     p_unit.m_Telemetry.m_udpProxy_recovery_state = 'idle';
                     p_unit.m_Telemetry.m_udpProxy_status_note = '';

@@ -9,6 +9,7 @@ import { js_localStorage } from '../js/js_localStorage';
 import * as js_siteConfig from '../js/js_siteConfig.js';
 import { js_eventEmitter } from '../js/js_eventEmitter';
 import { js_speak } from '../js/js_speak';
+import * as js_andruav_ws from '../js/server_comm/js_andruav_ws.js';
 import { QueryString, fn_connect, fn_logout, getTabStatus } from '../js/js_main';
 
 const CONST_NOT_CONNECTION_OFFLINE = 0;
@@ -41,7 +42,49 @@ class ClssLoginControl extends React.Component {
     js_eventEmitter.fn_subscribe(js_event.EE_onSocketStatus, this, this.fn_onSocketStatus);
     js_eventEmitter.fn_subscribe(js_event.EE_Auth_Login_In_Progress, this, this.fn_onAuthInProgress);
     js_eventEmitter.fn_subscribe(js_event.EE_Auth_BAD_Logined, this, this.fn_onAuthBad);
+    js_eventEmitter.fn_subscribe(js_event.EE_Auth_Logout_Completed, this, this.fn_onAuthLogoutCompleted);
+    js_eventEmitter.fn_subscribe(js_event.EE_Auth_Logout_Failed, this, this.fn_onAuthLogoutCompleted);
 
+  }
+
+  fn_setConnectionState(nextState, nextReason = '', extraPatch = null) {
+    const patch = {
+      is_connected: nextState,
+      status_reason: nextReason || '',
+      ...(extraPatch || {}),
+    };
+    if (this.m_flag_mounted === false) return;
+    this.setState((prev) => ({
+      ...prev,
+      ...patch,
+      m_update: prev.m_update + 1,
+    }));
+  }
+
+  fn_getEffectiveConnectionState() {
+    const wsStatus = js_andruav_ws.AndruavClientWS.getSocketStatus();
+    if (wsStatus === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
+      return CONST_NOT_CONNECTION_ONLINE;
+    }
+    if (
+      wsStatus === js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING
+      || wsStatus === js_andruavMessages.CONST_SOCKET_STATUS_CONNECTED
+    ) {
+      return (this.state.is_connected === CONST_NOT_CONNECTION_RETRYING)
+        ? CONST_NOT_CONNECTION_RETRYING
+        : CONST_NOT_CONNECTION_IN_PROGRESS;
+    }
+    return this.state.is_connected;
+  }
+
+  fn_syncWithRuntimeState() {
+    const effectiveState = this.fn_getEffectiveConnectionState();
+    if (effectiveState !== this.state.is_connected) {
+      this.fn_setConnectionState(
+        effectiveState,
+        effectiveState === CONST_NOT_CONNECTION_ONLINE ? '' : this.state.status_reason,
+      );
+    }
   }
 
 
@@ -52,29 +95,27 @@ class ClssLoginControl extends React.Component {
     if (me.m_flag_mounted === false) return;
 
     if (params.status === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
-      me.state.is_connected = CONST_NOT_CONNECTION_ONLINE;
-      me.state.status_reason = '';
-      me.state.username = me.txtUnitIDRef.current.value;
+      me.fn_setConnectionState(
+        CONST_NOT_CONNECTION_ONLINE,
+        '',
+        { username: me.txtUnitIDRef.current ? me.txtUnitIDRef.current.value : '' }
+      );
       js_speak.fn_speak(t('connectedSpeech')); // Translate "Connected"
       me.fn_hideLoginDropdown();
-      me.setState({ m_update: me.state.m_update + 1 });
     } else if (params.retrying === true) {
-      me.state.is_connected = CONST_NOT_CONNECTION_RETRYING;
       const attempt = params.attempt ? ` (${params.attempt}/${params.maxAttempts || ''})` : '';
-      me.state.status_reason = (params.reason || t('title.retrying')) + attempt;
-      me.setState({ m_update: me.state.m_update + 1 });
+      me.fn_setConnectionState(CONST_NOT_CONNECTION_RETRYING, (params.reason || t('title.retrying')) + attempt);
     } else if (params.status === js_andruavMessages.CONST_SOCKET_STATUS_CONNECTING) {
-      me.state.is_connected = CONST_NOT_CONNECTION_IN_PROGRESS;
-      me.state.status_reason = params.reason || t('title.connecting');
-      me.setState({ m_update: me.state.m_update + 1 });
+      me.fn_setConnectionState(CONST_NOT_CONNECTION_IN_PROGRESS, params.reason || t('title.connecting'));
     } else if (params.failed === true) {
-      me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE_FAILED;
-      me.state.status_reason = params.reason || 'Connection failed';
-      me.setState({ m_update: me.state.m_update + 1 });
+      me.fn_setConnectionState(CONST_NOT_CONNECTION_OFFLINE_FAILED, params.reason || 'Connection failed');
     } else {
-      me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE;
-      me.state.status_reason = '';
-      me.setState({ m_update: me.state.m_update + 1 });
+      const wsStatus = js_andruav_ws.AndruavClientWS.getSocketStatus();
+      if (wsStatus === js_andruavMessages.CONST_SOCKET_STATUS_REGISTERED) {
+        me.fn_setConnectionState(CONST_NOT_CONNECTION_ONLINE, '');
+      } else {
+        me.fn_setConnectionState(CONST_NOT_CONNECTION_OFFLINE, '');
+      }
     }
   }
 
@@ -95,24 +136,26 @@ class ClssLoginControl extends React.Component {
 
   fn_onAuthInProgress(me) {
     if (me.m_flag_mounted === false) return;
-    me.state.is_connected = CONST_NOT_CONNECTION_IN_PROGRESS;
-    me.state.status_reason = '';
-    me.setState({ m_update: me.state.m_update + 1 });
+    me.fn_setConnectionState(CONST_NOT_CONNECTION_IN_PROGRESS, '');
   }
 
   fn_onAuthBad(me, p_error) {
     if (me.m_flag_mounted === false) return;
-    me.state.is_connected = CONST_NOT_CONNECTION_OFFLINE_FAILED;
-    me.state.status_reason = p_error?.em || p_error?.error || 'Authentication failed';
-    me.setState({ m_update: me.state.m_update + 1 });
+    me.fn_setConnectionState(CONST_NOT_CONNECTION_OFFLINE_FAILED, p_error?.em || p_error?.error || 'Authentication failed');
+  }
+
+  fn_onAuthLogoutCompleted(me) {
+    if (me.m_flag_mounted === false) return;
+    me.fn_setConnectionState(CONST_NOT_CONNECTION_OFFLINE, '');
   }
 
 
   clickConnect(e) {
-    if ((this.state.is_connected !== CONST_NOT_CONNECTION_OFFLINE) && (this.state.is_connected !== CONST_NOT_CONNECTION_OFFLINE_FAILED)) {
+    const effectiveState = this.fn_getEffectiveConnectionState();
+    if ((effectiveState !== CONST_NOT_CONNECTION_OFFLINE) && (effectiveState !== CONST_NOT_CONNECTION_OFFLINE_FAILED)) {
       // online or connecting
       fn_logout();
-      this.setState({ is_connected: CONST_NOT_CONNECTION_OFFLINE });
+      this.fn_setConnectionState(CONST_NOT_CONNECTION_OFFLINE, '');
     } else {
       // offline
       this.setState({ m_update: this.state.m_update + 1, status_reason: '' });
@@ -139,6 +182,8 @@ class ClssLoginControl extends React.Component {
     js_eventEmitter.fn_unsubscribe(js_event.EE_onSocketStatus, this);
     js_eventEmitter.fn_unsubscribe(js_event.EE_Auth_Login_In_Progress, this);
     js_eventEmitter.fn_unsubscribe(js_event.EE_Auth_BAD_Logined, this);
+    js_eventEmitter.fn_unsubscribe(js_event.EE_Auth_Logout_Completed, this);
+    js_eventEmitter.fn_unsubscribe(js_event.EE_Auth_Logout_Failed, this);
   }
 
   componentDidMount() {
@@ -150,7 +195,6 @@ class ClssLoginControl extends React.Component {
     const lsPluginEnabled = js_localStorage.fn_getWebConnectorEnabled();
     const pluginConfigured = js_siteConfig.CONST_WEBCONNECTOR_ENABLED === true;
     const usePlugin = pluginConfigured && ((lsPluginEnabled !== null) ? lsPluginEnabled : true);
-    this.state.use_plugin = usePlugin;
     if (this.chkUsePluginRef.current) {
       this.chkUsePluginRef.current.checked = usePlugin;
     }
@@ -199,13 +243,16 @@ class ClssLoginControl extends React.Component {
       this.clickConnect(null);
     }
 
-    this.setState({ m_update: 1 });
+    this.setState({ use_plugin: usePlugin, m_update: 1 }, () => {
+      this.fn_syncWithRuntimeState();
+    });
 
     
   }
 
   render() {
     const { t } = this.props; // Access t function
+    const connectionState = this.fn_getEffectiveConnectionState();
     let control = [];
     let title;
     let css = 'btn-success';
@@ -213,12 +260,12 @@ class ClssLoginControl extends React.Component {
     let ctrls = [];
     let ctrls2 = [];
     const dir = this.props.i18n.language === 'ar' ? 'al_r' : 'al_l';
-    switch (this.state.is_connected) {
+    switch (connectionState) {
       
       case CONST_NOT_CONNECTION_OFFLINE_FAILED:
       case CONST_NOT_CONNECTION_OFFLINE:
         title = t('title.login');
-        css = this.state.is_connected===CONST_NOT_CONNECTION_OFFLINE_FAILED?'btn-warning':'btn-success';
+        css = connectionState===CONST_NOT_CONNECTION_OFFLINE_FAILED?'btn-warning':'btn-success';
         ctrls.push(
           <div key={'div_login' + this.key} className="">
             {js_siteConfig.CONST_WEBCONNECTOR_ENABLE && (
@@ -342,9 +389,9 @@ class ClssLoginControl extends React.Component {
         break;
       case CONST_NOT_CONNECTION_RETRYING:
       case CONST_NOT_CONNECTION_IN_PROGRESS:
-        title = this.state.is_connected === CONST_NOT_CONNECTION_RETRYING ? t('title.retrying') : t('title.connecting'); // "Connecting.."
-        css = this.state.is_connected === CONST_NOT_CONNECTION_RETRYING ? 'btn-warning' : 'bg-warning';
-        if (this.state.is_connected === CONST_NOT_CONNECTION_RETRYING) {
+        title = connectionState === CONST_NOT_CONNECTION_RETRYING ? t('title.retrying') : t('title.connecting'); // "Connecting.."
+        css = connectionState === CONST_NOT_CONNECTION_RETRYING ? 'btn-warning' : 'bg-warning';
+        if (connectionState === CONST_NOT_CONNECTION_RETRYING) {
           css += ' text-dark';
         }
         if (this.state.status_reason && this.state.status_reason.length > 0) {

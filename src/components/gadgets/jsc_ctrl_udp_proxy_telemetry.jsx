@@ -87,6 +87,7 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
   fn_startTelemetry(p_andruavUnit) {
     if (p_andruavUnit == null) return;
     this.fn_markManualTelemetryOverride(p_andruavUnit);
+    js_globals.v_andruavFacade.API_startTelemetry(p_andruavUnit);
     js_globals.v_andruavFacade.API_resumeTelemetry(p_andruavUnit);
     js_globals.v_andruavFacade.API_requestUdpProxyStatus(p_andruavUnit);
   }
@@ -169,6 +170,22 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     }
   }
 
+  fn_formatUdpStatusNote(note) {
+    const code = String(note || '').trim().toLowerCase();
+    switch (code) {
+      case 'drone-side-inactive':
+        return this.props.t('udpProxyTelemetry:droneSideInactive');
+      case 'status-stale':
+        return 'Status stale. Recovery retry needed.';
+      case 'telemetry-paused':
+        return 'Telemetry is paused.';
+      case 'invalid-proxy-port':
+        return 'Invalid telemetry proxy port.';
+      default:
+        return note || '';
+    }
+  }
+
   renderUnitHealth(v_andruavUnit, canControl) {
     const partyID = v_andruavUnit.getPartyID ? v_andruavUnit.getPartyID() : '';
     const snapshot = this.state.m_opsSnapshot || fn_opsHealthSnapshot();
@@ -178,6 +195,7 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
     const wsRetryMax = unitState?.ws?.maxAttempts || snapshot?.global?.ws?.maxAttempts || 0;
     const udpState = unitState?.udp?.state || 'inactive';
     const udpNote = unitState?.udp?.statusNote || '';
+    const udpNoteText = this.fn_formatUdpStatusNote(udpNote);
     const videoState = unitState?.video?.state || 'idle';
     const udpRetryCount = unitState?.udp?.retryCount || 0;
     const udpRetryMax = unitState?.udp?.retryMax || 0;
@@ -233,8 +251,8 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
             </span>
           ) : null}
         </div>
-        {udpNote && (
-          <div className="ops-unit-note">{udpNote}</div>
+        {udpNoteText && (
+          <div className="ops-unit-note">{udpNoteText}</div>
         )}
         <div className="ops-unit-actions">
           <button
@@ -334,6 +352,7 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
       v_telemetry_lvl_class = 'txt-theme-aware';
       const statusNote = v_andruavUnit.m_Telemetry.m_udpProxy_status_note || '';
       const isRecovering = v_andruavUnit.m_Telemetry.m_udpProxy_recovery_state === 'recovering';
+      const statusNoteText = this.fn_formatUdpStatusNote(statusNote);
       v_udp_data.push(
         <div key={v_andruavUnit.getPartyID() + 'refresh'} className="col-12 padding_zero css_user_select_text">
           <div className="css_margin_zero user-select-none">
@@ -342,9 +361,9 @@ class ClssCtrlUDPPoxyTelemetry extends React.Component {
                 {t('udpProxyTelemetry:recovering')}
               </p>
             )}
-            {statusNote === 'drone-side-inactive' && (
+            {!!statusNoteText && (
               <p className="si-07x css_margin_zero text-warning">
-                {t('udpProxyTelemetry:droneSideInactive')}
+                {statusNoteText}
               </p>
             )}
           </div>

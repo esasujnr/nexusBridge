@@ -114,14 +114,21 @@ const WS_RECONNECT_BASE_DELAY_MS = 1500;
 const UDP_RECOVERY_MAX_ATTEMPTS = 2;
 const UDP_RECOVERY_POLL_MS = 1200;
 const UDP_RECOVERY_COOLDOWN_MS = 8000;
+const UDP_PROXY_INFO_STALE_MS = 18000;
+const UDP_STATUS_WATCHDOG_INTERVAL_MS = 6000;
+const UDP_STATUS_STALE_PROBE_GRACE_MS = 9000;
+const UDP_STATUS_STALE_EVENT_COOLDOWN_MS = 90000;
 const GPS_MARKER_UPDATE_MIN_MS = 120;
 const MISSION_READ_LOCK_TIMEOUT_MS = 12000;
 let v_wsReconnectTimer = null;
 let v_wsReconnectAttempts = 0;
 let v_wsReconnectCancelled = false;
 let v_lastSocketStatusEvent = null;
+let v_udpStatusWatchdogTimer = null;
 const v_udpRecoveryJobs = {};
 const v_udpRecoveryCooldown = {};
+const v_udpStatusWatchdogNotifiedAt = {};
+const v_udpStatusProbeJobs = {};
 const v_gpsRenderJobs = {};
 const v_missionReadLocks = Object.create(null);
 const v_missionReadLockTimers = Object.create(null);
@@ -2033,6 +2040,90 @@ function fn_clearTelemetryRecoveryJob(partyID) {
 	delete v_udpRecoveryJobs[partyID];
 }
 
+function fn_clearUdpStatusProbeJob(partyID) {
+	if (!partyID) return;
+	delete v_udpStatusProbeJobs[partyID];
+}
+
+function fn_stopUdpStatusWatchdog() {
+	if (v_udpStatusWatchdogTimer !== null) {
+		clearInterval(v_udpStatusWatchdogTimer);
+		v_udpStatusWatchdogTimer = null;
+	}
+}
+
+function fn_startUdpStatusWatchdog() {
+	if (v_udpStatusWatchdogTimer !== null) return;
+	v_udpStatusWatchdogTimer = setInterval(() => {
+		const units = fn_getOnlineVehicleUnits();
+		if (!units || units.length === 0) return;
+		const now = Date.now();
+		for (const unit of units) {
+			if (!unit || !unit.m_Telemetry || typeof unit.getPartyID !== 'function') continue;
+			const telemetry = unit.m_Telemetry;
+			const partyID = unit.getPartyID();
+			if (!partyID) continue;
+			if (telemetry.m_udpProxy_recovery_state === 'recovering') continue;
+			if (telemetry.m_udpProxy_active !== true || telemetry.m_udpProxy_paused === true) {
+				fn_clearUdpStatusProbeJob(partyID);
+				delete v_udpStatusWatchdogNotifiedAt[partyID];
+				continue;
+			}
+
+			const lastInfoAt = Number(telemetry.m_udpProxy_last_info_at || 0);
+			const stale = (lastInfoAt <= 0) || ((now - lastInfoAt) > UDP_PROXY_INFO_STALE_MS);
+			if (!stale) {
+				fn_clearUdpStatusProbeJob(partyID);
+				delete v_udpStatusWatchdogNotifiedAt[partyID];
+				continue;
+			}
+
+			const probeState = v_udpStatusProbeJobs[partyID];
+			if (!probeState) {
+				v_udpStatusProbeJobs[partyID] = {
+					probeAt: now,
+					lastRecoverAttemptAt: 0
+				};
+				try {
+					js_globals.v_andruavFacade.API_requestUdpProxyStatus(unit);
+				} catch {
+					// no-op
+				}
+				fn_diag('udp', 'status_probe_requested', { partyID: partyID });
+				continue;
+			}
+
+			if ((now - Number(probeState.probeAt || 0)) < UDP_STATUS_STALE_PROBE_GRACE_MS) {
+				continue;
+			}
+
+			if ((now - Number(probeState.lastRecoverAttemptAt || 0)) < UDP_RECOVERY_COOLDOWN_MS) {
+				continue;
+			}
+			probeState.lastRecoverAttemptAt = now;
+			v_udpStatusProbeJobs[partyID] = probeState;
+
+			const lastNotifiedAt = Number(v_udpStatusWatchdogNotifiedAt[partyID] || 0);
+			if ((now - lastNotifiedAt) > UDP_STATUS_STALE_EVENT_COOLDOWN_MS) {
+				v_udpStatusWatchdogNotifiedAt[partyID] = now;
+				fn_opsHealthAddEvent({
+					source: 'udp',
+					level: 'warn',
+					partyID: partyID,
+					message: `${unit.m_unitName || partyID} UDP status stale after probe. Starting automatic recovery.`,
+				});
+			}
+
+			fn_recoverTelemetry(unit, {
+				reason: 'status_stale_auto',
+				maxAttempts: UDP_RECOVERY_MAX_ATTEMPTS,
+				pollMs: UDP_RECOVERY_POLL_MS,
+				force: false,
+			});
+		}
+	}, UDP_STATUS_WATCHDOG_INTERVAL_MS);
+}
+
 function fn_getOnlineVehicleUnits() {
 	const list = js_globals?.m_andruavUnitList;
 	if (!list || typeof list.fn_getUnitValues !== 'function') return [];
@@ -2158,8 +2249,13 @@ export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
 		const liveUnit = js_globals.m_andruavUnitList.fn_getUnit(partyID) || p_andruavUnit;
 		if (!liveUnit || liveUnit.m_IsDisconnectedFromGCS === true) {
 			fn_clearTelemetryRecoveryJob(partyID);
+			fn_clearUdpStatusProbeJob(partyID);
+			delete v_udpStatusWatchdogNotifiedAt[partyID];
 			return;
 		}
+		const telemetry = liveUnit.m_Telemetry || {};
+		const attemptStartedAt = Date.now();
+		const baselineInfoAt = Number(telemetry.m_udpProxy_last_info_at || 0);
 
 		fn_setTelemetryRecoveryState(liveUnit, 'recovering', '', attemptNo, maxAttempts);
 		fn_diag('udp', 'recover_attempt', {
@@ -2169,28 +2265,79 @@ export function fn_recoverTelemetry(p_andruavUnit, p_options = {}) {
 			reason: reason
 		});
 
+		const proxyPort = parseInt(telemetry.m_udpProxy_port || 0, 10);
+		if (Number.isFinite(proxyPort) && proxyPort > 0) {
+			js_globals.v_andruavFacade.API_setUdpProxyClientPort(liveUnit, proxyPort);
+		}
+		const currentTelemetryRate = parseInt(telemetry.m_telemetry_level || 0, 10);
+		const targetTelemetryRate = (
+			Number.isFinite(currentTelemetryRate) && currentTelemetryRate > 0
+				? Math.min(3, currentTelemetryRate)
+				: 2
+		);
 		js_globals.v_andruavFacade.API_startTelemetry(liveUnit);
 		js_globals.v_andruavFacade.API_resumeTelemetry(liveUnit);
+		js_globals.v_andruavFacade.API_adjustTelemetryDataRate(liveUnit, targetTelemetryRate);
 		js_globals.v_andruavFacade.API_requestUdpProxyStatus(liveUnit);
 
 		const timer = setTimeout(() => {
 			const refreshedUnit = js_globals.m_andruavUnitList.fn_getUnit(partyID) || liveUnit;
 			if (!refreshedUnit || refreshedUnit.m_IsDisconnectedFromGCS === true) {
 				fn_clearTelemetryRecoveryJob(partyID);
+				fn_clearUdpStatusProbeJob(partyID);
+				delete v_udpStatusWatchdogNotifiedAt[partyID];
 				return;
 			}
 
 			js_globals.v_andruavFacade.API_requestUdpProxyStatus(refreshedUnit);
-			if (refreshedUnit.m_Telemetry.m_udpProxy_active === true) {
+			const refreshedTelemetry = refreshedUnit.m_Telemetry || {};
+			const refreshedInfoAt = Number(refreshedTelemetry.m_udpProxy_last_info_at || 0);
+			const hasFreshStatus = refreshedInfoAt > baselineInfoAt && refreshedInfoAt >= attemptStartedAt;
+			const isActive = refreshedTelemetry.m_udpProxy_active === true;
+			const isPaused = refreshedTelemetry.m_udpProxy_paused === true;
+			const refreshedPort = parseInt(refreshedTelemetry.m_udpProxy_port || 0, 10);
+			const hasValidPort = Number.isFinite(refreshedPort) && refreshedPort > 0;
+			const recovered = hasFreshStatus && isActive === true && isPaused !== true && hasValidPort;
+
+			if (recovered) {
 				fn_setTelemetryRecoveryState(refreshedUnit, 'idle', '', attemptNo, maxAttempts);
-				fn_diag('udp', 'recover_success', { partyID: partyID, attempt: attemptNo, reason: reason });
+				fn_clearUdpStatusProbeJob(partyID);
+				delete v_udpStatusWatchdogNotifiedAt[partyID];
+				fn_diag('udp', 'recover_success', {
+					partyID: partyID,
+					attempt: attemptNo,
+					reason: reason,
+					proxyPort: refreshedPort,
+					telemetryLevel: refreshedTelemetry.m_telemetry_level
+				});
 				fn_clearTelemetryRecoveryJob(partyID);
 				return;
 			}
 
+			let failureNote = 'drone-side-inactive';
+			if (!hasFreshStatus) {
+				failureNote = 'status-stale';
+			}
+			else if (isActive === true && isPaused === true) {
+				failureNote = 'telemetry-paused';
+			}
+			else if (isActive === true && hasValidPort !== true) {
+				failureNote = 'invalid-proxy-port';
+			}
+
 			if (attemptNo >= maxAttempts) {
-				fn_setTelemetryRecoveryState(refreshedUnit, 'inactive', 'drone-side-inactive', attemptNo, maxAttempts);
-				fn_diag('udp', 'recover_failed', { partyID: partyID, attempts: attemptNo, reason: reason });
+				fn_setTelemetryRecoveryState(refreshedUnit, 'inactive', failureNote, attemptNo, maxAttempts);
+				fn_clearUdpStatusProbeJob(partyID);
+				fn_diag('udp', 'recover_failed', {
+					partyID: partyID,
+					attempts: attemptNo,
+					reason: reason,
+					failureNote: failureNote,
+					hasFreshStatus: hasFreshStatus,
+					isActive: isActive,
+					isPaused: isPaused,
+					proxyPort: refreshedPort
+				});
 				fn_clearTelemetryRecoveryJob(partyID);
 				return;
 			}
@@ -2218,6 +2365,7 @@ var EVT_onOpen = function () {
 	v_wsReconnectCancelled = false;
 	fn_clearWsReconnectTimer();
 	fn_diag('ws', 'registered', { retriesReset: true });
+	fn_startUdpStatusWatchdog();
 
 	const units = js_globals.m_andruavUnitList.fn_getUnitValues();
 	if (units && units.length > 0) {
@@ -2231,6 +2379,7 @@ var EVT_onOpen = function () {
 
 // called when Websocket Closed
 var EVT_onClose = function () {
+	fn_stopUdpStatusWatchdog();
 	const closeReason = v_lastSocketStatusEvent?.closeReason || '';
 	const closeCode = v_lastSocketStatusEvent?.closeCode;
 	const closeReasonCode = fn_socketReasonCodeFromEvent(v_lastSocketStatusEvent || {}, js_andruavMessages.CONST_SOCKET_STATUS_DISCONNECTED);
@@ -2519,9 +2668,13 @@ var EVT_onDeleted = function () {
 	if (js_globals.v_andruavWS) {
 		js_globals.v_andruavWS.fn_disconnect();
 	}
+	fn_stopUdpStatusWatchdog();
 	fn_clearWsReconnectTimer();
 	fn_clearGpsRenderJobs();
 	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
+	Object.keys(v_udpStatusWatchdogNotifiedAt).forEach((partyID) => delete v_udpStatusWatchdogNotifiedAt[partyID]);
+	Object.keys(v_udpRecoveryCooldown).forEach((partyID) => delete v_udpRecoveryCooldown[partyID]);
+	Object.keys(v_udpStatusProbeJobs).forEach((partyID) => delete v_udpStatusProbeJobs[partyID]);
 	js_globals.v_andruavClient = null;
 	js_globals.v_andruavFacade = null;
 	js_globals.v_andruavWS = null;
@@ -2538,6 +2691,11 @@ function EVT_unitOnlineChanged(me, p_andruavUnit) {
 	if (!p_andruavUnit) return;
 	if (p_andruavUnit.m_IsGCS === true) return;
 	if (p_andruavUnit.m_IsDisconnectedFromGCS === true) return;
+	const partyID = p_andruavUnit.getPartyID ? p_andruavUnit.getPartyID() : '';
+	if (partyID) {
+		delete v_udpStatusWatchdogNotifiedAt[partyID];
+		fn_clearUdpStatusProbeJob(partyID);
+	}
 	fn_recoverTelemetry(p_andruavUnit, { reason: 'unit_online_auto', maxAttempts: 1 });
 	fn_opsHealthSyncFromUnits();
 	fn_applyUIFocusRendering();
@@ -3856,10 +4014,14 @@ function fn_connectWebSocket(me) {
 export function fn_logout() {
 	fn_resetMapAutoCenterState();
 	js_globals.v_connectState = false;
+	fn_stopUdpStatusWatchdog();
 	v_wsReconnectAttempts = 0;
 	v_wsReconnectCancelled = false;
 	fn_clearWsReconnectTimer();
 	Object.keys(v_udpRecoveryJobs).forEach(fn_clearTelemetryRecoveryJob);
+	Object.keys(v_udpStatusWatchdogNotifiedAt).forEach((partyID) => delete v_udpStatusWatchdogNotifiedAt[partyID]);
+	Object.keys(v_udpRecoveryCooldown).forEach((partyID) => delete v_udpRecoveryCooldown[partyID]);
+	Object.keys(v_udpStatusProbeJobs).forEach((partyID) => delete v_udpStatusProbeJobs[partyID]);
 	fn_clearGpsRenderJobs();
 	js_andruavAuth.fn_retryLogin(false);
 	fn_opsHealthAddEvent({

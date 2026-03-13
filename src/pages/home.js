@@ -48,6 +48,20 @@ const Home = () => {
     }
     return 'balanced';
   });
+  const countOnlineVehicleUnits = useCallback(() => {
+    const units = js_globals?.m_andruavUnitList?.fn_getUnitValues?.() || [];
+    let count = 0;
+    units.forEach((unit) => {
+      if (!unit) return;
+      if (unit.m_defined !== true) return;
+      if (unit.m_IsGCS === true) return;
+      if (unit.m_IsDisconnectedFromGCS === true) return;
+      if (unit.m_IsShutdown === true) return;
+      count += 1;
+    });
+    return count;
+  }, []);
+  const [onlineVehicleCount, setOnlineVehicleCount] = useState(() => countOnlineVehicleUnits());
 
   const mapColumnClass = layoutPreset === 'map_focus'
     ? 'col-lg-9 col-xl-9 col-xxl-9 col-12'
@@ -218,6 +232,26 @@ const Home = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const listener = { id: 'home-online-vehicles-count' };
+    const refreshOnlineCount = () => {
+      setOnlineVehicleCount(countOnlineVehicleUnits());
+    };
+
+    js_eventEmitter.fn_subscribe(js_event.EE_unitAdded, listener, refreshOnlineCount);
+    js_eventEmitter.fn_subscribe(js_event.EE_unitOnlineChanged, listener, refreshOnlineCount);
+    js_eventEmitter.fn_subscribe(js_event.EE_unitUpdated, listener, refreshOnlineCount);
+    js_eventEmitter.fn_subscribe(js_event.EE_onSocketStatus, listener, refreshOnlineCount);
+    refreshOnlineCount();
+
+    return () => {
+      js_eventEmitter.fn_unsubscribe(js_event.EE_unitAdded, listener);
+      js_eventEmitter.fn_unsubscribe(js_event.EE_unitOnlineChanged, listener);
+      js_eventEmitter.fn_unsubscribe(js_event.EE_unitUpdated, listener);
+      js_eventEmitter.fn_unsubscribe(js_event.EE_onSocketStatus, listener);
+    };
+  }, [countOnlineVehicleUnits]);
+
   return (
     <div>
       <ClssHeaderControl />
@@ -353,13 +387,18 @@ const Home = () => {
             <div id="andruavUnits_in" className="settings-panel-body" style={{ display: isSettingsOpen ? 'block' : 'none' }}>
               <ClssGlobalSettings />
               <div id="andruavUnitGlobals"></div>
-              <div className="nb-right-panel-section-title">
-                <strong>{t('home:onlineUnits')}</strong>
-              </div>
             </div>
             <div id="guiMessageCtrl" className="row"></div>
+            <div className={`nb-vehicles-status-strip ${onlineVehicleCount > 0 ? 'is-online' : 'is-empty'}`}>
+              <span className={`nb-vehicles-status-strip__icon bi ${onlineVehicleCount > 0 ? 'bi-broadcast-pin' : 'bi-slash-circle'}`} aria-hidden="true"></span>
+              <span className="nb-vehicles-status-strip__label">
+                {onlineVehicleCount > 0 ? t('home:onlineUnits') : t('msg.no_online_units')}
+              </span>
+              <span className="nb-vehicles-status-strip__count">{onlineVehicleCount}</span>
+            </div>
             <div id="andruavUnitList" className="row">
               <ClssAndruavUnitList
+                hideEmptyStateText={true}
                 tab_planning={false}
                 tab_main={true}
                 tab_log={true}

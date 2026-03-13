@@ -126,6 +126,22 @@ function fn_getOnlineVehicleUnits() {
     ));
 }
 
+function fn_humanizeUdpNote(note) {
+    const code = String(note || '').trim().toLowerCase();
+    switch (code) {
+        case 'drone-side-inactive':
+            return 'Drone-side proxy inactive';
+        case 'status-stale':
+            return 'Status stale (no fresh proxy update)';
+        case 'telemetry-paused':
+            return 'Telemetry is paused';
+        case 'invalid-proxy-port':
+            return 'Invalid telemetry proxy port';
+        default:
+            return note || '';
+    }
+}
+
 function fn_normalizeUdpState(telemetry) {
     const recoveryState = telemetry?.m_udpProxy_recovery_state || 'idle';
     const active = telemetry?.m_udpProxy_active === true;
@@ -138,13 +154,18 @@ function fn_normalizeUdpState(telemetry) {
         state = 'inactive';
     } else if (paused === true) {
         state = 'paused';
+    } else if (note === 'status-stale' || note === 'invalid-proxy-port') {
+        state = 'degraded';
     } else {
         state = 'active';
     }
 
-    let detail = note || 'Inactive';
+    let detail = fn_humanizeUdpNote(note) || 'Inactive';
     if (state === 'active' || state === 'paused') {
         detail = `${telemetry?.m_udpProxy_ip || '-'}:${telemetry?.m_udpProxy_port || 0}`;
+    }
+    if (state === 'degraded') {
+        detail = fn_humanizeUdpNote(note) || `${telemetry?.m_udpProxy_ip || '-'}:${telemetry?.m_udpProxy_port || 0}`;
     }
     if (state === 'paused') {
         detail = `${detail} (paused)`;

@@ -233,8 +233,9 @@ class ClssAndruavUnitList extends React.Component {
 
         if (this.state.andruavUnitPartyIDs.length === 0) 
         {
-
-            unit.push (<div key={'no_online_units'} className='text-center text-uppercase' >{t('msg.no_online_units')}</div>);
+            if (this.props.hideEmptyStateText !== true) {
+                unit.push (<div key={'no_online_units'} className='text-center text-uppercase' >{t('msg.no_online_units')}</div>);
+            }
         }
         else 
         {
