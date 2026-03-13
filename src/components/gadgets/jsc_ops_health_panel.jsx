@@ -17,6 +17,9 @@ import {
 } from '../../js/js_mission_integrity.js';
 import { js_websocket_bridge } from '../../js/CPC/js_websocket_bridge.js';
 
+const POLICY_FALLBACK_WARN_COOLDOWN_MS = 5 * 60 * 1000;
+const POLICY_FALLBACK_WARN_MIN_HOLD_MS = 20 * 1000;
+
 function fn_stateClass(state) {
   switch (state) {
     case 'connected':
@@ -111,7 +114,7 @@ function ClssOpsHealthPanel() {
   const [bridgeEnabled, setBridgeEnabled] = useState(js_websocket_bridge.fn_isEnabled() === true);
   const [bridgeConnected, setBridgeConnected] = useState(js_websocket_bridge.fn_isConnected() === true);
   const [bridgeStats, setBridgeStats] = useState(() => js_websocket_bridge.fn_getRuntimeStats());
-  const policyWarnRef = useRef({ signature: '', at: 0 });
+  const policyWarnRef = useRef({ signature: '', at: 0, since: 0 });
 
   const fn_syncBridgeState = () => {
     const stats = js_websocket_bridge.fn_getRuntimeStats();
@@ -216,19 +219,29 @@ function ClssOpsHealthPanel() {
   useEffect(() => {
     if (linkPolicy.mode !== 'fallback' || !linkPolicy.fallbackFlyingSignature) {
       policyWarnRef.current.signature = '';
+      policyWarnRef.current.since = 0;
+      policyWarnRef.current.at = 0;
       return;
     }
 
     const now = Date.now();
     const names = linkPolicy.fallbackFlyingUnits.map((unit) => unit.unitName).join(', ');
     const signature = `${linkPolicy.mode}:${linkPolicy.fallbackFlyingSignature}`;
-    const staleWarn = (now - Number(policyWarnRef.current.at || 0)) > 45000;
-    const changed = policyWarnRef.current.signature !== signature;
-    if (changed !== true && staleWarn !== true) {
+
+    if (policyWarnRef.current.signature !== signature) {
+      policyWarnRef.current.signature = signature;
+      policyWarnRef.current.since = now;
+      policyWarnRef.current.at = 0;
       return;
     }
 
-    policyWarnRef.current.signature = signature;
+    if ((now - Number(policyWarnRef.current.since || 0)) < POLICY_FALLBACK_WARN_MIN_HOLD_MS) {
+      return;
+    }
+
+    const staleWarn = (now - Number(policyWarnRef.current.at || 0)) > POLICY_FALLBACK_WARN_COOLDOWN_MS;
+    if (staleWarn !== true) return;
+
     policyWarnRef.current.at = now;
     fn_opsHealthAddEvent({
       source: 'policy',

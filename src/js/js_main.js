@@ -114,10 +114,12 @@ const WS_RECONNECT_BASE_DELAY_MS = 1500;
 const UDP_RECOVERY_MAX_ATTEMPTS = 2;
 const UDP_RECOVERY_POLL_MS = 1200;
 const UDP_RECOVERY_COOLDOWN_MS = 8000;
-const UDP_PROXY_INFO_STALE_MS = 18000;
+const UDP_PROXY_INFO_STALE_MS = 75000;
 const UDP_STATUS_WATCHDOG_INTERVAL_MS = 6000;
-const UDP_STATUS_STALE_PROBE_GRACE_MS = 9000;
+const UDP_STATUS_STALE_PROBE_GRACE_MS = 12000;
 const UDP_STATUS_STALE_EVENT_COOLDOWN_MS = 90000;
+const UDP_STATUS_STALE_PROBE_MAX_MISSES = 2;
+const UDP_STATUS_AUTO_RECOVERY_COOLDOWN_MS = 180000;
 const GPS_MARKER_UPDATE_MIN_MS = 120;
 const MISSION_READ_LOCK_TIMEOUT_MS = 12000;
 let v_wsReconnectTimer = null;
@@ -129,6 +131,7 @@ const v_udpRecoveryJobs = {};
 const v_udpRecoveryCooldown = {};
 const v_udpStatusWatchdogNotifiedAt = {};
 const v_udpStatusProbeJobs = {};
+const v_udpStatusAutoRecoveryAt = {};
 const v_gpsRenderJobs = {};
 const v_missionReadLocks = Object.create(null);
 const v_missionReadLockTimers = Object.create(null);
@@ -2082,7 +2085,8 @@ function fn_startUdpStatusWatchdog() {
 			if (!probeState) {
 				v_udpStatusProbeJobs[partyID] = {
 					probeAt: now,
-					lastRecoverAttemptAt: 0
+					lastRecoverAttemptAt: 0,
+					misses: 0
 				};
 				try {
 					js_globals.v_andruavFacade.API_requestUdpProxyStatus(unit);
@@ -2100,7 +2104,37 @@ function fn_startUdpStatusWatchdog() {
 			if ((now - Number(probeState.lastRecoverAttemptAt || 0)) < UDP_RECOVERY_COOLDOWN_MS) {
 				continue;
 			}
+
+			// Re-check freshness right before escalation. Parser updates this timestamp asynchronously.
+			const refreshedLastInfoAt = Number(telemetry.m_udpProxy_last_info_at || 0);
+			const stillStale = (refreshedLastInfoAt <= 0) || ((now - refreshedLastInfoAt) > UDP_PROXY_INFO_STALE_MS);
+			if (!stillStale) {
+				fn_clearUdpStatusProbeJob(partyID);
+				delete v_udpStatusWatchdogNotifiedAt[partyID];
+				continue;
+			}
+
+			const misses = Number(probeState.misses || 0) + 1;
+			probeState.misses = misses;
+			if (misses < UDP_STATUS_STALE_PROBE_MAX_MISSES) {
+				probeState.probeAt = now;
+				v_udpStatusProbeJobs[partyID] = probeState;
+				try {
+					js_globals.v_andruavFacade.API_requestUdpProxyStatus(unit);
+				} catch {
+					// no-op
+				}
+				fn_diag('udp', 'status_probe_recheck', { partyID: partyID, misses: misses });
+				continue;
+			}
+
+			const lastAutoRecoveryAt = Number(v_udpStatusAutoRecoveryAt[partyID] || 0);
+			if ((now - lastAutoRecoveryAt) < UDP_STATUS_AUTO_RECOVERY_COOLDOWN_MS) {
+				continue;
+			}
+			v_udpStatusAutoRecoveryAt[partyID] = now;
 			probeState.lastRecoverAttemptAt = now;
+			probeState.misses = 0;
 			v_udpStatusProbeJobs[partyID] = probeState;
 
 			const lastNotifiedAt = Number(v_udpStatusWatchdogNotifiedAt[partyID] || 0);
@@ -2675,6 +2709,7 @@ var EVT_onDeleted = function () {
 	Object.keys(v_udpStatusWatchdogNotifiedAt).forEach((partyID) => delete v_udpStatusWatchdogNotifiedAt[partyID]);
 	Object.keys(v_udpRecoveryCooldown).forEach((partyID) => delete v_udpRecoveryCooldown[partyID]);
 	Object.keys(v_udpStatusProbeJobs).forEach((partyID) => delete v_udpStatusProbeJobs[partyID]);
+	Object.keys(v_udpStatusAutoRecoveryAt).forEach((partyID) => delete v_udpStatusAutoRecoveryAt[partyID]);
 	js_globals.v_andruavClient = null;
 	js_globals.v_andruavFacade = null;
 	js_globals.v_andruavWS = null;
@@ -2695,6 +2730,7 @@ function EVT_unitOnlineChanged(me, p_andruavUnit) {
 	if (partyID) {
 		delete v_udpStatusWatchdogNotifiedAt[partyID];
 		fn_clearUdpStatusProbeJob(partyID);
+		delete v_udpStatusAutoRecoveryAt[partyID];
 	}
 	fn_recoverTelemetry(p_andruavUnit, { reason: 'unit_online_auto', maxAttempts: 1 });
 	fn_opsHealthSyncFromUnits();
@@ -4022,6 +4058,7 @@ export function fn_logout() {
 	Object.keys(v_udpStatusWatchdogNotifiedAt).forEach((partyID) => delete v_udpStatusWatchdogNotifiedAt[partyID]);
 	Object.keys(v_udpRecoveryCooldown).forEach((partyID) => delete v_udpRecoveryCooldown[partyID]);
 	Object.keys(v_udpStatusProbeJobs).forEach((partyID) => delete v_udpStatusProbeJobs[partyID]);
+	Object.keys(v_udpStatusAutoRecoveryAt).forEach((partyID) => delete v_udpStatusAutoRecoveryAt[partyID]);
 	fn_clearGpsRenderJobs();
 	js_andruavAuth.fn_retryLogin(false);
 	fn_opsHealthAddEvent({
